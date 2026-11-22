@@ -1,0 +1,730 @@
+{
+ "destinations": {
+  "AU": {
+   "iso3": "AUS",
+   "name": "Australia",
+   "config": {
+    "authority": "Department of Home Affairs",
+    "official_sites": [
+     "https://immi.homeaffairs.gov.au"
+    ],
+    "policy_sources": [
+     "https://immi.homeaffairs.gov.au"
+    ],
+    "recruitment_rules": "Check Home Affairs and state regulators for licensed agent requirements (Migration Agents Registration Authority / OMARA)."
+   },
+   "pathways": [
+    {
+     "id": "au-employer-sponsored",
+     "country": "AU",
+     "name": "Employer-sponsored skilled work visa",
+     "category": "employer_sponsored",
+     "official_url": "https://immi.homeaffairs.gov.au",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "sponsor",
+       "category": "Employer sponsorship",
+       "label": "Job offer / sponsor employer secured",
+       "field": "preferences.has_job_offer",
+       "op": "truthy",
+       "value": true,
+       "improve": "Search verified sponsoring employers in the Opportunities section."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least diploma",
+       "field": "education.level",
+       "op": "gte",
+       "value": "diploma",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "exp",
+       "category": "Work experience",
+       "label": "At least 2 years relevant experience",
+       "field": "employment.total_years",
+       "op": "gte",
+       "value": 2,
+       "improve": "Build documented, referenced experience."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)"
+     ],
+     "last_verified": null
+    },
+    {
+     "id": "au-student",
+     "country": "AU",
+     "name": "Student visa (study pathway)",
+     "category": "study",
+     "official_url": "https://immi.homeaffairs.gov.au",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least secondary",
+       "field": "education.level",
+       "op": "gte",
+       "value": "secondary",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      },
+      {
+       "id": "funds",
+       "category": "Financial capacity",
+       "label": "Funds for fees and settlement declared",
+       "field": "financial.budget_usd",
+       "op": "gte",
+       "value": 1,
+       "improve": "Plan a budget; see Budget Planning.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)",
+      "Offer from registered institution",
+      "Proof of funds"
+     ],
+     "last_verified": null
+    }
+   ]
+  },
+  "CA": {
+   "iso3": "CAN",
+   "name": "Canada",
+   "config": {
+    "authority": "Immigration, Refugees and Citizenship Canada (IRCC)",
+    "official_sites": [
+     "https://www.canada.ca/en/services/immigration-citizenship.html"
+    ],
+    "policy_sources": [
+     "https://www.canada.ca/en/immigration-refugees-citizenship.html"
+    ],
+    "recruitment_rules": "Only use authorised representatives (licensed consultants, lawyers). Employers must not charge recruitment fees to workers in most provinces; verify provincial rules."
+   },
+   "pathways": [
+    {
+     "id": "ca-skilled-economic",
+     "country": "CA",
+     "name": "Skilled worker economic immigration (federal/provincial)",
+     "category": "skilled",
+     "official_url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/immigrate-canada.html",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "age",
+       "category": "Age eligibility",
+       "label": "Age at most 45",
+       "field": "age",
+       "op": "lte",
+       "value": 45,
+       "improve": "Age limits are fixed; consider other pathways."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least bachelor",
+       "field": "education.level",
+       "op": "gte",
+       "value": "bachelor",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "exp",
+       "category": "Work experience",
+       "label": "At least 1 years relevant experience",
+       "field": "employment.total_years",
+       "op": "gte",
+       "value": 1,
+       "improve": "Build documented, referenced experience."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)",
+      "Credential assessment (if required)"
+     ],
+     "last_verified": null
+    },
+    {
+     "id": "ca-employer-work-permit",
+     "country": "CA",
+     "name": "Employer-specific work permit",
+     "category": "employer_sponsored",
+     "official_url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/work-canada.html",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "sponsor",
+       "category": "Employer sponsorship",
+       "label": "Job offer / sponsor employer secured",
+       "field": "preferences.has_job_offer",
+       "op": "truthy",
+       "value": true,
+       "improve": "Search verified sponsoring employers in the Opportunities section."
+      },
+      {
+       "id": "exp",
+       "category": "Work experience",
+       "label": "At least 1 years relevant experience",
+       "field": "employment.total_years",
+       "op": "gte",
+       "value": 1,
+       "improve": "Build documented, referenced experience."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)"
+     ],
+     "last_verified": null
+    },
+    {
+     "id": "ca-study",
+     "country": "CA",
+     "name": "Study permit",
+     "category": "study",
+     "official_url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/study-canada.html",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least secondary",
+       "field": "education.level",
+       "op": "gte",
+       "value": "secondary",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      },
+      {
+       "id": "funds",
+       "category": "Financial capacity",
+       "label": "Funds for fees and settlement declared",
+       "field": "financial.budget_usd",
+       "op": "gte",
+       "value": 1,
+       "improve": "Plan a budget; see Budget Planning.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)",
+      "Letter of acceptance from designated institution",
+      "Proof of funds"
+     ],
+     "last_verified": null
+    }
+   ]
+  },
+  "VN": {
+   "iso3": "VNM",
+   "name": "Vietnam",
+   "config": {
+    "authority": "Immigration Department / Ministry of Labour, Invalids and Social Affairs (MOLISA)",
+    "official_sites": [
+     "https://xuatnhapcanh.gov.vn",
+     "https://www.molisa.gov.vn"
+    ],
+    "policy_sources": [
+     "https://www.molisa.gov.vn"
+    ],
+    "recruitment_rules": "Work permits are generally employer-initiated; verify current decrees with MOLISA or the provincial labour department."
+   },
+   "pathways": [
+    {
+     "id": "vn-work-permit",
+     "country": "VN",
+     "name": "Foreign worker work permit (employer-initiated)",
+     "category": "employer_sponsored",
+     "official_url": "https://www.molisa.gov.vn",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "sponsor",
+       "category": "Employer sponsorship",
+       "label": "Job offer / sponsor employer secured",
+       "field": "preferences.has_job_offer",
+       "op": "truthy",
+       "value": true,
+       "improve": "Search verified sponsoring employers in the Opportunities section."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least bachelor",
+       "field": "education.level",
+       "op": "gte",
+       "value": "bachelor",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "exp",
+       "category": "Work experience",
+       "label": "At least 3 years relevant experience",
+       "field": "employment.total_years",
+       "op": "gte",
+       "value": 3,
+       "improve": "Build documented, referenced experience."
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)",
+      "Health certificate",
+      "Employer application dossier"
+     ],
+     "last_verified": null
+    }
+   ]
+  },
+  "NO": {
+   "iso3": "NOR",
+   "name": "Norway",
+   "config": {
+    "authority": "Norwegian Directorate of Immigration (UDI)",
+    "official_sites": [
+     "https://www.udi.no/en/"
+    ],
+    "policy_sources": [
+     "https://www.udi.no/en/"
+    ],
+    "recruitment_rules": "Skilled worker permits require a concrete job offer; check UDI occupational and salary requirements."
+   },
+   "pathways": [
+    {
+     "id": "no-skilled-worker",
+     "country": "NO",
+     "name": "Skilled worker residence permit",
+     "category": "employer_sponsored",
+     "official_url": "https://www.udi.no/en/want-to-apply/work-immigration/",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "sponsor",
+       "category": "Employer sponsorship",
+       "label": "Job offer / sponsor employer secured",
+       "field": "preferences.has_job_offer",
+       "op": "truthy",
+       "value": true,
+       "improve": "Search verified sponsoring employers in the Opportunities section."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least vocational",
+       "field": "education.level",
+       "op": "gte",
+       "value": "vocational",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)",
+      "Job offer / employment contract"
+     ],
+     "last_verified": null
+    },
+    {
+     "id": "no-study",
+     "country": "NO",
+     "name": "Study residence permit",
+     "category": "study",
+     "official_url": "https://www.udi.no/en/want-to-apply/studies/",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least secondary",
+       "field": "education.level",
+       "op": "gte",
+       "value": "secondary",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      },
+      {
+       "id": "funds",
+       "category": "Financial capacity",
+       "label": "Funds for fees and settlement declared",
+       "field": "financial.budget_usd",
+       "op": "gte",
+       "value": 1,
+       "improve": "Plan a budget; see Budget Planning.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)",
+      "Admission letter",
+      "Proof of funds"
+     ],
+     "last_verified": null
+    }
+   ]
+  },
+  "NZ": {
+   "iso3": "NZL",
+   "name": "New Zealand",
+   "config": {
+    "authority": "Immigration New Zealand (INZ)",
+    "official_sites": [
+     "https://www.immigration.govt.nz"
+    ],
+    "policy_sources": [
+     "https://www.immigration.govt.nz"
+    ],
+    "recruitment_rules": "Employers must be accredited to hire on employer-assisted visas; verify accreditation on the INZ website. Check Licensed Immigration Adviser register."
+   },
+   "pathways": [
+    {
+     "id": "nz-accredited-employer",
+     "country": "NZ",
+     "name": "Accredited employer work visa",
+     "category": "employer_sponsored",
+     "official_url": "https://www.immigration.govt.nz",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "sponsor",
+       "category": "Employer sponsorship",
+       "label": "Job offer / sponsor employer secured",
+       "field": "preferences.has_job_offer",
+       "op": "truthy",
+       "value": true,
+       "improve": "Search verified sponsoring employers in the Opportunities section."
+      },
+      {
+       "id": "exp",
+       "category": "Work experience",
+       "label": "At least 2 years relevant experience",
+       "field": "employment.total_years",
+       "op": "gte",
+       "value": 2,
+       "improve": "Build documented, referenced experience."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)"
+     ],
+     "last_verified": null
+    },
+    {
+     "id": "nz-student",
+     "country": "NZ",
+     "name": "Student visa",
+     "category": "study",
+     "official_url": "https://www.immigration.govt.nz",
+     "requirements": [
+      {
+       "id": "passport",
+       "category": "Documentation",
+       "label": "Valid passport held",
+       "field": "documents.passport",
+       "op": "truthy",
+       "value": true,
+       "improve": "Obtain or renew a passport."
+      },
+      {
+       "id": "edu",
+       "category": "Education",
+       "label": "Education at least secondary",
+       "field": "education.level",
+       "op": "gte",
+       "value": "secondary",
+       "improve": "Consider study or vocational training pathways first."
+      },
+      {
+       "id": "lang",
+       "category": "Language proficiency",
+       "label": "English language evidence available",
+       "field": "language.english_evidence",
+       "op": "truthy",
+       "value": true,
+       "improve": "Book an approved English test (e.g. IELTS) if the authority requires one.",
+       "blocking": false
+      },
+      {
+       "id": "funds",
+       "category": "Financial capacity",
+       "label": "Funds for fees and settlement declared",
+       "field": "financial.budget_usd",
+       "op": "gte",
+       "value": 1,
+       "improve": "Plan a budget; see Budget Planning.",
+       "blocking": false
+      }
+     ],
+     "documents": [
+      "Passport",
+      "CV",
+      "Educational certificates",
+      "Transcripts",
+      "Employment references",
+      "Police clearance",
+      "Medical examination (when requested by authority)",
+      "Language test result (if required)",
+      "Offer of place",
+      "Proof of funds"
+     ],
+     "last_verified": null
+    }
+   ]
+  }
+ },
+ "origins": {
+  "LR": {
+   "iso3": "LBR",
+   "name": "Liberia",
+   "active": true
+  },
+  "GH": {
+   "iso3": "GHA",
+   "name": "Ghana",
+   "active": false
+  },
+  "NG": {
+   "iso3": "NGA",
+   "name": "Nigeria",
+   "active": false
+  },
+  "SL": {
+   "iso3": "SLE",
+   "name": "Sierra Leone",
+   "active": false
+  },
+  "GM": {
+   "iso3": "GMB",
+   "name": "The Gambia",
+   "active": false
+  },
+  "KE": {
+   "iso3": "KEN",
+   "name": "Kenya",
+   "active": false
+  },
+  "UG": {
+   "iso3": "UGA",
+   "name": "Uganda",
+   "active": false
+  },
+  "ZA": {
+   "iso3": "ZAF",
+   "name": "South Africa",
+   "active": false
+  }
+ }
+}

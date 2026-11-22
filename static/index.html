@@ -1,0 +1,55 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Global Pathways</title>
+<style>
+:root{--bg:#f7f8fa;--fg:#1b2430;--card:#fff;--mut:#667;--ac:#0b6e4f;--bd:#dde1e7}
+@media(prefers-color-scheme:dark){:root{--bg:#10151b;--fg:#e6eaf0;--card:#18202a;--mut:#9aa6b5;--ac:#3ec28f;--bd:#2b3644}}
+body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{padding:14px 16px;border-bottom:1px solid var(--bd)}h1{margin:0;font-size:18px}
+nav{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px}
+button,input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:6px 10px}
+button{cursor:pointer}button.on,button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
+main{padding:0 16px 40px;max-width:980px;margin:auto}.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px;margin:10px 0}
+.badge{font-size:12px;padding:1px 8px;border-radius:10px;border:1px solid var(--bd)}.mut{color:var(--mut)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}label{display:block;font-size:13px;color:var(--mut)}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--bd);padding:4px 6px;text-align:left;vertical-align:top}
+.met{color:var(--ac)}.unmet{color:#c0392b}.unknown{color:var(--mut)}pre{white-space:pre-wrap;overflow:auto}
+</style></head><body>
+<header><h1>Global Pathways <span class="mut">· migration intelligence & advisory</span></h1>
+<div class="mut" style="font-size:13px">Informational only. No visa, sponsorship or outcome is ever guaranteed. Always confirm on official sources.</div></header>
+<nav id="nav"></nav><main id="main"></main>
+<script>
+const $=s=>document.querySelector(s),api=async(p,o={})=>{const r=await fetch('/api'+p,{headers:{'Content-Type':'application/json','X-Admin-Token':localStorage.admin||''},...o});if(!r.ok)throw new Error((await r.text()));return r.json()};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let aid=+localStorage.aid||null,tab='Countries';
+const tabs={Countries,Opportunities,Profile,Assessment,Advisor,Admin};
+function nav(){$('#nav').innerHTML=Object.keys(tabs).map(t=>`<button class="${t==tab?'on':''}" onclick="tab='${t}';nav()">${t}</button>`).join('');tabs[tab]().catch(e=>$('#main').innerHTML=`<div class=card>${esc(e.message)}</div>`)}
+async function Countries(){const cs=await api('/countries?role=destination'),ps=await api('/pathways');
+$('#main').innerHTML=cs.map(c=>`<div class=card><b>${esc(c.name)}</b> <span class=badge>${c.active?'active':'inactive'}</span> <span class="badge">rules ${c.last_verified?'verified '+c.last_verified:'unverified'}</span>
+<div class=mut>${esc(c.config.authority||'')} · ${(c.config.official_sites||[]).map(u=>`<a href="${esc(u)}" target=_blank rel=noopener>${esc(u)}</a>`).join(', ')}</div>
+<ul>${ps.filter(p=>p.country==c.iso2).map(p=>`<li>${esc(p.name)} <span class=mut>(${p.category}${p.last_verified?'':' · requirements unverified'})</span></li>`).join('')}</ul></div>`).join('')}
+async function Opportunities(){$('#main').innerHTML=`<div class=card><div class=grid>
+<div><label>Country (ISO2)</label><input id=fc></div><div><label>Nationality (ISO2)</label><input id=fn value="LR"></div>
+<div><label>Occupation</label><input id=fo></div><div><label>Type</label><input id=fk placeholder="employer_sponsored"></div>
+<div><label><input type=checkbox id=fs> sponsorship</label><label><input type=checkbox id=ff> no applicant fee</label></div></div>
+<button class=pri onclick=searchOpp()>Search</button> <span class=mut>Only verified / partially verified, open listings are shown.</span></div><div id=res></div>`;searchOpp()}
+async function searchOpp(){const q=new URLSearchParams();[['country','fc'],['nationality','fn'],['occupation','fo'],['kind','fk']].forEach(([k,i])=>$('#'+i).value&&q.set(k,$('#'+i).value));$('#fs').checked&&q.set('sponsorship','true');$('#ff').checked&&q.set('no_applicant_fee','true');
+const r=await api('/opportunities?'+q);$('#res').innerHTML=r.length?r.map(o=>`<div class=card><b>${esc(o.title)}</b> <span class=badge>${esc(o.verification)}</span> <span class=badge>${esc(o.country)}</span><div class=mut>${esc(o.kind)} · sponsorship ${o.sponsorship} · applicant fee ${o.applicant_fee===null?'unknown':o.applicant_fee} · deadline ${o.deadline||'n/a'}</div>${o.url?`<a href="${esc(o.url)}" target=_blank rel=noopener>Official application link</a>`:''}</div>`).join(''):'<div class=card>No verified matches yet. An admin adds organizations, verifies them, then adds opportunities.</div>'}
+const F=[['full_name','Full legal name'],['nationality','Nationality (ISO2, e.g. LR)'],['country_of_birth','Country of birth'],['residence','Current residence'],['dob','Date of birth (YYYY-MM-DD)'],['education.level','Education: none|primary|secondary|vocational|diploma|bachelor|master|doctorate'],['employment.total_years','Years of work experience'],['language.english_evidence','English test/evidence? (true/false)'],['documents.passport','Passport held? (true/false)'],['preferences.has_job_offer','Have job offer? (true/false)'],['financial.budget_usd','Budget (USD)']];
+const setp=(o,p,v)=>{const k=p.split('.');k.slice(0,-1).forEach(x=>o=o[x]??={});o[k.at(-1)]=v};const getp=(o,p)=>p.split('.').reduce((a,k)=>a?.[k],o);
+async function Profile(){const cur=aid?await api('/applicants/'+aid):{profile:{},consent:{}};
+$('#main').innerHTML=`<div class=card><p class=mut>Collected once, used for all destinations. Nothing sensitive (passport number, medical) is asked here. Tick "share with advisor" per field; unticked fields stay private.</p><div class=grid>${F.map(([k,l])=>`<div><label>${l}</label><input data-k="${k}" value="${esc(getp(cur.profile,k)??'')}"><label><input type=checkbox data-c="${k.split('.')[0]}" ${['advisor','share'].includes(cur.consent[k.split('.')[0]])?'checked':''}> share with advisor</label></div>`).join('')}</div>
+<button class=pri onclick=saveP()>Save profile</button> ${aid?`<button onclick="delP()">Delete my data</button> <span class=mut>Profile #${aid}</span>`:''}</div>`}
+async function saveP(){const p={},c={};document.querySelectorAll('[data-k]').forEach(i=>{let v=i.value.trim();if(v==='')return;if(v==='true'||v==='false')v=v==='true';else if(!isNaN(v)&&!/^\d{4}-/.test(v))v=+v;setp(p,i.dataset.k,v)});document.querySelectorAll('[data-c]').forEach(i=>c[i.dataset.c]=i.checked?'advisor':'private');
+if(!aid){aid=(await api('/applicants',{method:'POST',body:JSON.stringify({profile:p,consent:c})})).id;localStorage.aid=aid}else await api('/applicants/'+aid,{method:'PUT',body:JSON.stringify({profile:p,consent:c})});tab='Assessment';nav()}
+async function delP(){await api('/applicants/'+aid,{method:'DELETE'});delete localStorage.aid;aid=null;nav()}
+async function Assessment(){if(!aid)return $('#main').innerHTML='<div class=card>Create a profile first.</div>';const r=await api(`/applicants/${aid}/assessment`);
+$('#main').innerHTML=r.map(a=>`<div class=card><b>${esc(a.pathway)}</b> <span class=badge>${esc(a.country)}</span> <span class=badge>${esc(a.status)}</span> <span class=badge>readiness ${a.readiness_pct}%</span>
+${a.warnings.map(w=>`<div class=unmet>⚠ ${esc(w)}</div>`).join('')}<table><tr><th>Requirement</th><th>Your info</th><th>Result</th><th>Action</th></tr>${a.requirements.map(q=>`<tr><td>${esc(q.requirement)}<div class=mut>${q.kind}</div></td><td>${esc(q.applicant_value??'—')}</td><td class=${q.result}>${q.result}</td><td>${esc(q.recommended_action)}</td></tr>`).join('')}</table>
+<div class=mut>${esc(a.readiness_note)} <a href="${esc(a.official_url)}" target=_blank rel=noopener>Official source</a></div></div>`).join('')}
+async function Advisor(){if(!aid)return $('#main').innerHTML='<div class=card>Create a profile first.</div>';const modes=['general','eligibility','jobs','scholarships','preparation','documents','interview','budget','comparison','progress'];
+$('#main').innerHTML=`<div class=card><select id=mode>${modes.map(m=>`<option>${m}</option>`).join('')}</select> <input id=ac placeholder="country ISO2 (optional)" size=8> <button class=pri onclick=ask()>Ask</button><pre id=out class=mut>Advisor answers come from database records and the rules engine, using only fields you shared.</pre></div>`}
+async function ask(){const r=await api(`/applicants/${aid}/advisor`,{method:'POST',body:JSON.stringify({mode:$('#mode').value,country:$('#ac').value||null})});$('#out').textContent=JSON.stringify(r,null,2)}
+async function Admin(){$('#main').innerHTML=`<div class=card><label>Admin token</label><input id=tok value="${esc(localStorage.admin||'')}"> <button onclick="localStorage.admin=$('#tok').value;nav()">Save</button>
+<p class=mut>Admin API (see README): add countries, pathways, organizations, evidence, run verification, human decisions, discovery.</p></div><div id=q></div>`;try{const q=await api('/admin/review-queue');$('#q').innerHTML=`<div class=card><b>Human review queue (${q.length})</b>${q.map(o=>`<div>${esc(o.name)} · ${esc(o.status)} · confidence ${o.confidence}</div>`).join('')}</div>`}catch(e){$('#q').innerHTML='<div class=card mut>Enter a valid admin token to see the review queue.</div>'}}
+nav()
+</script></body></html>

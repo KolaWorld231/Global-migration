@@ -1,0 +1,126 @@
+"""Data layer. Country-specific content lives in JSON columns / seed files, never in code."""
+import os
+from datetime import datetime, date
+from sqlalchemy import create_engine, String, Integer, Boolean, JSON, DateTime, Text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+
+DB_URL = os.environ.get("DATABASE_URL", "sqlite:///./pathways.db")
+engine = create_engine(DB_URL, connect_args={"check_same_thread": False} if DB_URL.startswith("sqlite") else {})
+SessionLocal = sessionmaker(engine, expire_on_commit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Country(Base):
+    """Used for both origin and destination markets; roles are flags, not code paths."""
+    __tablename__ = "countries"
+    iso2: Mapped[str] = mapped_column(String(2), primary_key=True)
+    iso3: Mapped[str] = mapped_column(String(3))
+    name: Mapped[str] = mapped_column(String(100))
+    is_destination: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_origin: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
+    # authority, official_sites, policy_sources, regulations, fees, contacts, recruitment_rules, ...
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_verified: Mapped[date | None] = mapped_column(nullable=True)
+    source_reliability: Mapped[str] = mapped_column(String(20), default="unrated")
+
+
+class Pathway(Base):
+    """A visa / permit / scholarship / humanitarian route with declarative requirements."""
+    __tablename__ = "pathways"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    country: Mapped[str] = mapped_column(String(2), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    category: Mapped[str] = mapped_column(String(40))  # skilled|employer_sponsored|seasonal|study|humanitarian|family|...
+    official_url: Mapped[str] = mapped_column(String(500), default="")
+    requirements: Mapped[list] = mapped_column(JSON, default=list)  # see engine/eligibility.py
+    documents: Mapped[list] = mapped_column(JSON, default=list)
+    fees: Mapped[dict] = mapped_column(JSON, default=dict)  # {"application_usd": n|None, "notes": ""}
+    excluded_nationalities: Mapped[list] = mapped_column(JSON, default=list)
+    allowed_nationalities: Mapped[list] = mapped_column(JSON, default=list)  # empty = any
+    last_verified: Mapped[date | None] = mapped_column(nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    category: Mapped[str] = mapped_column(String(40))  # employer|recruiter|government|education|ngo|migration_support
+    country: Mapped[str] = mapped_column(String(2), index=True)
+    origins_accepted: Mapped[list] = mapped_column(JSON, default=list)
+    website: Mapped[str] = mapped_column(String(300), default="")
+    details: Mapped[dict] = mapped_column(JSON, default=dict)  # address, email, phone, fees, benefits...
+    source_urls: Mapped[list] = mapped_column(JSON, default=list)
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(30), default="UNVERIFIED", index=True)
+    confidence: Mapped[int] = mapped_column(Integer, default=0)
+    needs_human_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_verified: Mapped[date | None] = mapped_column(nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class Opportunity(Base):
+    __tablename__ = "opportunities"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(300))
+    org_id: Mapped[int] = mapped_column(Integer, index=True)
+    country: Mapped[str] = mapped_column(String(2), index=True)
+    pathway_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    occupation: Mapped[str] = mapped_column(String(120), default="")
+    industry: Mapped[str] = mapped_column(String(120), default="")
+    min_education: Mapped[str] = mapped_column(String(30), default="none")
+    min_experience_years: Mapped[float] = mapped_column(default=0)
+    sponsorship: Mapped[bool] = mapped_column(Boolean, default=False)
+    relocation: Mapped[bool] = mapped_column(Boolean, default=False)
+    accommodation: Mapped[bool] = mapped_column(Boolean, default=False)
+    applicant_fee: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None = unknown
+    salary_min: Mapped[float | None] = mapped_column(nullable=True)
+    salary_currency: Mapped[str] = mapped_column(String(3), default="")
+    nationality_allowed: Mapped[list] = mapped_column(JSON, default=list)
+    nationality_excluded: Mapped[list] = mapped_column(JSON, default=list)
+    language_required: Mapped[dict] = mapped_column(JSON, default=dict)
+    deadline: Mapped[date | None] = mapped_column(nullable=True)
+    url: Mapped[str] = mapped_column(String(500), default="")
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN")
+    verification: Mapped[str] = mapped_column(String(30), default="UNVERIFIED", index=True)
+    last_checked: Mapped[date | None] = mapped_column(nullable=True)
+
+
+class Applicant(Base):
+    __tablename__ = "applicants"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile: Mapped[dict] = mapped_column(JSON, default=dict)
+    # field -> "private" | "advisor" | "share"; absent = private. Advisor only reads advisor/share.
+    consent: Mapped[dict] = mapped_column(JSON, default=dict)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class Case(Base):
+    """Application/case tracking: one per applicant+pathway."""
+    __tablename__ = "cases"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    applicant_id: Mapped[int] = mapped_column(Integer, index=True)
+    pathway_id: Mapped[str] = mapped_column(String(80))
+    stage: Mapped[str] = mapped_column(String(30), default="PLANNING")
+    checklist: Mapped[dict] = mapped_column(JSON, default=dict)  # document -> status
+    log: Mapped[list] = mapped_column(JSON, default=list)
+    updated: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class DiscoveryJob(Base):
+    __tablename__ = "discovery_jobs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    country: Mapped[str] = mapped_column(String(2))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+def init_db():
+    Base.metadata.create_all(engine)
