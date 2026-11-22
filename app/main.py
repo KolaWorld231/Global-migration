@@ -10,6 +10,8 @@ from .db import (init_db, SessionLocal, Country, Pathway, Organization, Opportun
 from .seed.loader import seed
 from .engine import eligibility, verification, advisor, discovery, matching
 from . import security, vault, prep, notify, workflows
+from .agents import runtime as agent_rt, seed as agent_seed
+from .db import AgentConfig, AgentTask, ApprovalRequest, OutreachDraft
 from .db import Workflow, WorkflowRun, AuthSession
 from .db import Notification, CaseNote, Task, Communication, Setting
 from .engine import fraud, research
@@ -24,14 +26,14 @@ def _startup():
     init_db()
     seed()
     bootstrap_admin()
-    with SessionLocal() as _s: workflows.seed_defaults(_s)
+    with SessionLocal() as _s: workflows.seed_defaults(_s); agent_seed.seed_agents(_s)
     if os.environ.get("SCHEDULER") == "1":
         import threading, time
         def loop():
             while True:
                 try:
                     research.run_due()
-                    with SessionLocal() as s: notify.scan(s); workflows.tick(s)
+                    with SessionLocal() as s: notify.scan(s); workflows.tick(s); agent_rt.run_queued(s)
                 except Exception as e: print('[scheduler]', e)
                 time.sleep(900)
         threading.Thread(target=loop, daemon=True).start()
@@ -288,7 +290,7 @@ class StaffIn(BaseModel):
 
 @app.post("/api/admin/staff")
 def add_staff(b: StaffIn, u: User = Depends(require("user.manage")), s=Depends(db)):
-    if b.role not in security.ROLES or b.role == "applicant": raise HTTPException(422, "bad role")
+    if b.role not in security.ROLES or b.role == "applicant" or b.role.startswith("agent_"): raise HTTPException(422, "bad role")
     security.valid_password(b.password)
     s.add(User(email=b.email.lower(), pw_hash=security.hash_pw(b.password), role=b.role)); s.commit()
     audit(s, u.id, "staff_created", b.email, role=b.role)
@@ -897,7 +899,7 @@ def dashboard(u: User = Depends(require("dashboard.view")), s=Depends(db)):
 # ---------- Staff management ----------
 @app.get("/api/admin/staff")
 def list_staff(u: User = Depends(require("user.manage")), s=Depends(db)):
-    return [{"id": x.id, "email": x.email, "role": x.role, "active": x.active, "open_cases": s.query(Case).filter_by(assigned_to=x.id).count()}
+    return [{"id": x.id, "email": x.email, "role": x.role, "active": x.active, "open_cases": s.query(Case).filter_by(assigned_to=x.id).count(), "is_agent": x.role.startswith("agent_")}
             for x in s.query(User).filter(User.role != "applicant")]
 
 
@@ -909,6 +911,7 @@ class StaffPatch(BaseModel):
 def patch_staff(uid: int, b: StaffPatch, u: User = Depends(require("user.manage")), s=Depends(db)):
     t = s.get(User, uid)
     if not t or t.role == "applicant": raise HTTPException(404)
+    if t.role.startswith("agent_") or (b.role or "").startswith("agent_"): raise HTTPException(422, "agents are managed under /api/admin/agents")
     if t.id == u.id: raise HTTPException(422, "you cannot change your own role or status")
     if b.role is not None and (b.role not in security.ROLES or b.role == "applicant"): raise HTTPException(422, "bad role")
     leaving = t.role == "super_admin" and ((b.role and b.role != "super_admin") or b.active is False)
@@ -967,6 +970,93 @@ def wf_decide(rid: int, approve: bool, u: User = Depends(current_user), s=Depend
 @app.post("/api/admin/workflow-runs/tick")
 def wf_tick(u: User = Depends(require("workflow.manage")), s=Depends(db)):
     return {"resumed": workflows.tick(s)}
+
+
+# ---------- AI agents ----------
+@app.get("/api/admin/agents")
+def list_agents(u: User = Depends(require("agent.manage")), s=Depends(db)):
+    from .agents.tools import TOOLS
+    return {"paused": agent_rt.paused(s), "model": "no model configured: agents run deterministic handlers",
+            "agents": [row(a) | {"pending_approvals": s.query(ApprovalRequest).filter_by(agent_key=a.key, status="PENDING").count(),
+                                 "queued_tasks": s.query(AgentTask).filter_by(agent_key=a.key, status="QUEUED").count()} for a in s.query(AgentConfig)],
+            "tools": {k: {"risk": v.risk, "human_perm": v.human_perm} for k, v in TOOLS.items()}}
+
+
+class AgentPatch(BaseModel):
+    active: bool | None = None; responsibilities: str | None = None; allowed_tools: list[str] | None = None; max_steps: int | None = None
+
+
+@app.patch("/api/admin/agents/{key}")
+def patch_agent(key: str, b: AgentPatch, u: User = Depends(require("agent.manage")), s=Depends(db)):
+    from .agents.tools import TOOLS
+    a = s.get(AgentConfig, key)
+    if not a: raise HTTPException(404)
+    if b.allowed_tools is not None:
+        if any(t not in TOOLS for t in b.allowed_tools): raise HTTPException(422, "unknown tool")
+        a.allowed_tools = b.allowed_tools
+    if b.active is not None: a.active = b.active
+    if b.responsibilities is not None: a.responsibilities = b.responsibilities
+    if b.max_steps is not None:
+        if not 1 <= b.max_steps <= 200: raise HTTPException(422, "max_steps 1-200")
+        a.max_steps = b.max_steps
+    s.commit(); audit(s, u.id, "agent_configured", key, change=b.model_dump(exclude_none=True))
+    return row(a)
+
+
+@app.post("/api/admin/agents/pause-all")
+def pause_all(paused: bool = True, u: User = Depends(require("agent.manage")), s=Depends(db)):
+    agent_rt.set_paused(s, paused); audit(s, u.id, "agents_paused", paused=paused)
+    return {"paused": paused}
+
+
+class AgentTaskIn(BaseModel):
+    agent: str; type: str; input: dict = {}; run_now: bool = False
+
+
+@app.post("/api/admin/agents/tasks")
+def create_agent_task(b: AgentTaskIn, u: User = Depends(require("agent.manage")), s=Depends(db)):
+    if b.agent not in agent_rt.AGENT_TASKS or b.type not in agent_rt.AGENT_TASKS[b.agent] or not s.get(AgentConfig, b.agent):
+        raise HTTPException(422, "unknown agent/task type")
+    t = AgentTask(agent_key=b.agent, type=b.type, input=b.input, assigned_by=u.id); s.add(t); s.commit()
+    audit(s, u.id, "agent_task_assigned", t.id, agent=b.agent)
+    if b.run_now: agent_rt.run_task(s, t.id); s.refresh(t)
+    return row(t)
+
+
+@app.get("/api/admin/agents/tasks")
+def agent_tasks(status: str | None = None, u: User = Depends(require("agent.manage")), s=Depends(db)):
+    q = s.query(AgentTask).order_by(AgentTask.id.desc())
+    return [row(t) for t in (q.filter_by(status=status) if status else q).limit(200)]
+
+
+@app.post("/api/admin/agents/tasks/{tid}/run")
+def run_agent_task(tid: int, u: User = Depends(require("agent.manage")), s=Depends(db)):
+    t = agent_rt.run_task(s, tid)
+    if not t: raise HTTPException(422, "task not runnable")
+    return row(t)
+
+
+@app.get("/api/admin/approvals")
+def approvals(status: str = "PENDING", u: User = Depends(current_user), s=Depends(db)):
+    from .agents.tools import TOOLS
+    mine = security.PERMS.get(u.role, set())
+    if not (mine & {"org.verify", "research.review", "fraud.investigate", "agent.manage"}): raise HTTPException(403, "no approval permissions")
+    out = []
+    for r in s.query(ApprovalRequest).filter_by(status=status).order_by(ApprovalRequest.id):
+        out.append(row(r) | {"can_decide": TOOLS[r.tool].human_perm in mine, "needs_permission": TOOLS[r.tool].human_perm})
+    return out
+
+
+@app.post("/api/admin/approvals/{aid}/decide")
+def decide_approval(aid: int, approve: bool, reason: str = "", u: User = Depends(current_user), s=Depends(db)):
+    try: return agent_rt.decide(s, aid, approve, u, reason)
+    except PermissionError as e: raise HTTPException(403, f"missing permission: {e}")
+    except ValueError as e: raise HTTPException(422, str(e))
+
+
+@app.get("/api/admin/outreach-drafts")
+def drafts(u: User = Depends(require("org.manage")), s=Depends(db)):
+    return [row(d) for d in s.query(OutreachDraft).order_by(OutreachDraft.id.desc()).limit(100)]
 
 
 @app.get("/")

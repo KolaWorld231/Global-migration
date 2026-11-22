@@ -354,3 +354,59 @@ class WorkflowRun(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     log: Mapped[list] = mapped_column(JSON, default=list)
     created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class AgentConfig(Base):
+    """An AI staff member. Responsibilities and tool allowlist are data; authority is enforced in code (app/agents)."""
+    __tablename__ = "agent_configs"
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    responsibilities: Mapped[str] = mapped_column(Text, default="")
+    allowed_tools: Mapped[list] = mapped_column(JSON, default=list)
+    max_steps: Mapped[int] = mapped_column(Integer, default=30)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    model_provider: Mapped[str] = mapped_column(String(20), default="none")  # none|mock|<adapter name>
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # audit identity (cannot log in)
+
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_key: Mapped[str] = mapped_column(String(40), index=True)
+    type: Mapped[str] = mapped_column(String(40))
+    input: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="QUEUED", index=True)  # QUEUED|RUNNING|NEEDS_APPROVAL|DONE|FAILED|REJECTED
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    log: Mapped[list] = mapped_column(JSON, default=list)
+    error: Mapped[str] = mapped_column(Text, default="")
+    assigned_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class ApprovalRequest(Base):
+    """A HIGH-risk action proposed by an agent. Nothing happens until a human with the right permission approves."""
+    __tablename__ = "approval_requests"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(Integer, index=True)
+    agent_key: Mapped[str] = mapped_column(String(40))
+    tool: Mapped[str] = mapped_column(String(60))
+    args: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(10), default="PENDING", index=True)
+    decided_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class OutreachDraft(Base):
+    """Drafts only. The platform never sends them; a human copies/sends after review."""
+    __tablename__ = "outreach_drafts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_id: Mapped[int] = mapped_column(Integer, index=True)
+    subject: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10), default="DRAFT")
+    created_by: Mapped[str] = mapped_column(String(40), default="")
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)

@@ -30,6 +30,11 @@ PERMS["agency_director"] |= {"dashboard.view"}
 PERMS["auditor"] |= {"dashboard.view"}
 PERMS["compliance_reviewer"] |= {"dashboard.view"}
 PERMS["agency_director"] |= {"case.configure"}
+AGENT_KEYS = ["research_triage", "verification_analyst", "case_prep", "fraud_triage", "monitoring", "outreach"]
+for _k in AGENT_KEYS:  # agents hold only an identity permission; real limits are the tool allowlist + approval queue
+    PERMS[f"agent_{_k}"] = {"agent.act"}
+PERMS["super_admin"] |= {"agent.manage"}
+PERMS["agency_director"] |= {"agent.manage"}
 PERMS["super_admin"] |= {"catalog.verify", "fraud.investigate"}
 PERMS["compliance_reviewer"] |= {"fraud.investigate", "research.review"}
 PERMS["super_admin"] |= {"research.review"}

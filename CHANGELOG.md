@@ -1,4 +1,6 @@
 # Changelog
+## Session 8
+- AI agents as staff with human approval boundary; migration 9483d0164674; 24 tests passing; AI_SYSTEM_GUIDE.md.
 ## Session 7
 - Workflow engine, staff management, staff UI panels; 19 tests passing. Migration 486abc618d3d.
 ## Session 6

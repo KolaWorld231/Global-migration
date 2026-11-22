@@ -27,7 +27,7 @@ def test_feed_dedupe_and_page_change_history():
         fid = src(c, H, "https://gov.example/feed.xml", "feed")
         research.execute(fid, fetch=lambda u: R(RSS))
         research.execute(fid, fetch=lambda u: R(RSS))                       # same items again => duplicates, not new
-        res = c.get("/api/admin/research/results", headers=H).json()
+        res = [r for r in c.get("/api/admin/research/results", headers=H).json() if r["source_id"] == fid]
         assert len(res) == 2 and all(r["status"] == "NEEDS_REVIEW" for r in res)  # never auto-published
         pid = src(c, H, "https://gov.example/fees")
         research.execute(pid, fetch=lambda u: R("<html><body>Fee 100</body></html>"))

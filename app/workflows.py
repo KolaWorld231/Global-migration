@@ -9,7 +9,7 @@ from . import security
 from .engine.eligibility import get_path
 
 TRIGGERS = {"applicant.registered", "application.status_changed", "regulatory.confirmed", "fraud.reported"}
-STEP_TYPES = {"notify", "assign_case", "create_task", "set_stage", "delay", "approval", "escalate"}
+STEP_TYPES = {"notify", "assign_case", "create_task", "set_stage", "delay", "approval", "escalate", "agent_task"}
 OPS = {"eq": lambda a, b: a == b, "ne": lambda a, b: a != b, "in": lambda a, b: a in b,
        "gte": lambda a, b: a >= b, "lte": lambda a, b: a <= b}
 
@@ -31,7 +31,7 @@ def validate(trigger, conditions, steps):
         if t not in STEP_TYPES:
             raise ValueError(f"step type must be one of {sorted(STEP_TYPES)}")
         need = {"notify": {"title"}, "assign_case": set(), "create_task": {"title"}, "set_stage": {"stage"},
-                "delay": {"hours"}, "approval": set(), "escalate": {"staff_id", "message"}}[t]
+                "delay": {"hours"}, "approval": set(), "escalate": {"staff_id", "message"}, "agent_task": {"agent", "task_type"}}[t]
         if need - set(st):
             raise ValueError(f"{t} step requires {sorted(need)}")
 
@@ -99,6 +99,14 @@ def _step(s, run, st):
         c = _case(s, ctx)
         c.history = [*c.history, {"stage": st["stage"], "at": datetime.utcnow().isoformat(timespec="seconds"), "by": None}]
         c.stage = st["stage"]
+    elif t == "agent_task":
+        from .db import AgentTask, AgentConfig
+        from .agents.runtime import AGENT_TASKS
+        if st["agent"] not in AGENT_TASKS or st["task_type"] not in AGENT_TASKS[st["agent"]] or not s.get(AgentConfig, st["agent"]):
+            raise StepError("unknown agent or task type")
+        inp = {k: ctx[v[1:-1]] if isinstance(v, str) and v.startswith("{") and v.endswith("}") and v[1:-1] in ctx else v
+               for k, v in (st.get("input") or {}).items()}
+        s.add(AgentTask(agent_key=st["agent"], type=st["task_type"], input=inp))
     elif t == "escalate":
         c = _case(s, ctx)
         s.add(Task(case_id=c.id, title="ESCALATION: " + render(st["message"], ctx), assignee_id=st["staff_id"],
