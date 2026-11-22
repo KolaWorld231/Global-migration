@@ -1,4 +1,6 @@
 # Changelog
+## Session 5
+- Admin dashboard endpoint and staff/alerts/safety UI; Playwright smoke test (not yet committed as an automated e2e). 14 pytest tests passing.
 ## Session 4
 - Notifications service and staff case management (13 tests passing). Case table schema changed: recreate dev DBs (no migrations yet).
 ## Session 3

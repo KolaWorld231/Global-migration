@@ -1,6 +1,7 @@
 import os, secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
+from sqlalchemy import text
 from fastapi import FastAPI, Depends, HTTPException, Header, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -829,6 +830,61 @@ def my_case(u: User = Depends(current_user), s=Depends(db)):
     c = s.query(Case).filter_by(applicant_id=u.applicant_id).first()
     if not c: raise HTTPException(404)
     return {"stage": c.stage, "updated": c.updated.isoformat(), "advisor_assigned": c.assigned_to is not None}  # no internal notes
+
+
+# ---------- Admin dashboard (real aggregates only) ----------
+CLOSED = {"SUCCESSFUL", "UNSUCCESSFUL", "CLOSED"}
+REQUIRED_PROFILE = ("full_name", "dob", "nationality")
+
+
+def tally(values, min_n=10):
+    out: dict = {}
+    for v in values: out[v or "unknown"] = out.get(v or "unknown", 0) + 1
+    return {"counts": out, "total": len(values),
+            "caution": f"Fewer than {min_n} records: do not draw conclusions about trends or about whole countries." if len(values) < min_n else None}
+
+
+@app.get("/api/admin/dashboard")
+def dashboard(u: User = Depends(require("dashboard.view")), s=Depends(db)):
+    now, week, soon = datetime.utcnow(), datetime.utcnow() - timedelta(days=7), date.today() + timedelta(days=14)
+    aps = s.query(Applicant).all()
+    cases = s.query(Case).all()
+    apps = s.query(Application).all()
+    orgs = s.query(Organization).all()
+    srcs = s.query(ResearchSource).all()
+    try:
+        s.execute(text("select 1")); dbok = True
+    except Exception: dbok = False
+    store_ok = os.access(vault.STORAGE if vault.STORAGE.exists() else ".", os.W_OK)
+    return {
+        "generated": now.isoformat(timespec="seconds"),
+        "applicants": {"total": len(aps), "new_last_7_days": sum(1 for a in aps if a.created >= week),
+                       "profiles_completed": sum(1 for a in aps if all(a.profile.get(k) for k in REQUIRED_PROFILE))},
+        "cases": {"active": sum(1 for c in cases if c.stage not in CLOSED), "unassigned": sum(1 for c in cases if c.assigned_to is None and c.stage not in CLOSED),
+                  "by_stage": tally([c.stage for c in cases], 1)["counts"]},
+        "applications": {"in_progress": sum(1 for a in apps if a.status not in ("SUCCESSFUL", "UNSUCCESSFUL", "WITHDRAWN")),
+                         "successful": sum(1 for a in apps if a.status == "SUCCESSFUL"),
+                         "unsuccessful": sum(1 for a in apps if a.status == "UNSUCCESSFUL"),
+                         "upcoming_deadlines": sum(1 for a in apps if a.deadline and date.today() <= a.deadline <= soon and a.status in ("PREPARING", "READY")),
+                         "note": "Outcomes are self-reported by applicants; a job offer is not counted as an approval."},
+        "organizations": {"total": len(orgs), "verified": sum(1 for o in orgs if o.status == "VERIFIED"),
+                          "awaiting_verification": sum(1 for o in orgs if o.status in ("UNVERIFIED", "PARTIALLY VERIFIED")),
+                          "needs_human_review": sum(1 for o in orgs if o.needs_human_review)},
+        "opportunities": {"total": s.query(Opportunity).count(), "open_verified": s.query(Opportunity).filter(Opportunity.status == "OPEN", Opportunity.verification.in_(["VERIFIED", "PARTIALLY VERIFIED"])).count()},
+        "countries": {"activated": s.query(Country).filter_by(active=True, is_destination=True).count()},
+        "research": {"sources": len(srcs), "stale_sources": sum(1 for x in srcs if x.last_ok is None or (now - x.last_ok).total_seconds() > 2 * x.interval_hours * 3600),
+                     "failed_runs": s.query(ResearchRun).filter_by(status="FAILED").count(), "dead_runs": s.query(ResearchRun).filter_by(status="DEAD").count(),
+                     "leads_awaiting_review": s.query(ResearchResult).filter_by(status="NEEDS_REVIEW").count(),
+                     "regulatory_changes_pending": s.query(RegulatoryChange).filter_by(review_status="PENDING_REVIEW").count()},
+        "fraud": {"open_reports": s.query(FraudReport).filter(FraudReport.status.in_(["NEW", "INVESTIGATING"])).count()},
+        "health": {"database": dbok, "document_storage_writable": store_ok,
+                   "scheduler": "enabled" if os.environ.get("SCHEDULER") == "1" else "disabled",
+                   "document_encryption_key": "configured" if os.environ.get("DOC_ENCRYPTION_KEY") else "DEV FALLBACK KEY IN USE",
+                   "email_provider": "NOT_CONFIGURED" if type(notify.EMAIL) is notify.EmailAdapter else "configured",
+                   "malware_scanner": "NOT_CONFIGURED"},
+        "analytics": {"applicants_by_nationality": tally([a.profile.get("nationality") for a in aps]),
+                      "applications_by_pathway": tally([a.pathway_id for a in apps])},
+    }
 
 
 @app.get("/")

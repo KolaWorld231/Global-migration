@@ -21,3 +21,6 @@ Country-agnostic migration intelligence platform (FastAPI + SQLAlchemy + vanilla
 ## Important
 The seeded pathway requirements are **draft placeholders, unverified**. A person must check each against the official source
 and call `POST /api/admin/pathways/{id}/verify`. No fees, organizations or job listings are seeded; none are invented.
+
+## Browser smoke test
+Start the server on :8766 with BOOTSTRAP_ADMIN_EMAIL=root@example.org BOOTSTRAP_ADMIN_PASSWORD=RootPassw0rdX and a fresh DB, then `node tests/e2e/smoke.js <outdir>` (needs playwright).

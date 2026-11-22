@@ -88,3 +88,17 @@ def test_regulatory_confirmation_notifies_affected_applicants():
             s.add(ch); s.commit(); cid = ch.id
         c.post(f"/api/admin/regulatory-changes/{cid}/review?decision=CONFIRMED_IMPACT", headers=root)
         assert any(n["kind"] == "regulatory_change" for n in c.get("/api/notifications", headers=A).json())
+
+
+def test_dashboard_real_numbers_and_permissions():
+    with TestClient(app) as c:
+        root = tok(c)
+        a, A = applicant(c, "dash1@example.org")
+        assert c.get("/api/admin/dashboard", headers=A).status_code == 403
+        d0 = c.get("/api/admin/dashboard", headers=root).json()
+        applicant(c, "dash2@example.org")
+        d1 = c.get("/api/admin/dashboard", headers=root).json()
+        assert d1["applicants"]["total"] == d0["applicants"]["total"] + 1          # live, not hardcoded
+        assert d1["countries"]["activated"] >= 5
+        assert d1["health"]["email_provider"] == "NOT_CONFIGURED" and d1["health"]["database"] is True
+        assert d1["analytics"]["applicants_by_nationality"]["caution"] or d1["analytics"]["applicants_by_nationality"]["total"] >= 10
