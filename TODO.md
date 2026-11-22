@@ -13,7 +13,8 @@ Order: 1) verification+research engine and country foundation (in progress) → 
 - [x] Repo, modular FastAPI app, config-driven models, tests
 - [x] Auth (scrypt, sessions, rate-limited login), 11 roles, RBAC, audit log, tenant column on users
 - [~] Multi-tenancy: tenant on users only; add to all tables
-- [ ] Alembic migrations · MFA · email verification · password recovery · CSRF (token auth in header, so CSRF n/a unless cookies adopted)
+- [x] Alembic migrations (SQLite-verified; drift test) + CI workflow (not yet observed running on GitHub)
+- [ ] Verify migrations on PostgreSQL · MFA · email verification · password recovery · CSRF (token auth in header, so CSRF n/a unless cookies adopted)
 ## Phase 2 Country intelligence
 - [x] 5 destinations + 8 origin markets as data; admin add/activate/verify country & pathways; expansion test
 - [h] All seeded pathway requirements are DRAFT: each needs checking against official sources

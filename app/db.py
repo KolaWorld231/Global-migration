@@ -173,7 +173,14 @@ class DiscoveryJob(Base):
 
 
 def init_db():
-    Base.metadata.create_all(engine)
+    """Apply Alembic migrations (the only supported way to create/upgrade the schema)."""
+    import pathlib
+    from alembic import command
+    from alembic.config import Config
+    root = pathlib.Path(__file__).resolve().parent.parent
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "migrations"))
+    command.upgrade(cfg, "head")
 
 
 # ---------------- Phase 1/5 additions: identity, audit, documents, applications ----------------

@@ -5,7 +5,7 @@ verification-first, never promise visas, never invent employers/fees/rules, neve
 
 ## Stack decision (documented)
 Brief suggests Next.js/TS/Postgres. Repo started empty; I built **Python FastAPI + SQLAlchemy (SQLite dev, Postgres via DATABASE_URL) + vanilla JS UI**
-to get a tested, working core fast. Migrating UI to Next.js and adding Alembic migrations are open tasks (TODO.md). Do not rewrite working code without reason.
+to get a tested, working core fast. Migrating UI to Next.js is an open task; migrations (Alembic) are done on SQLite only, not yet run on Postgres. Do not rewrite working code without reason.
 
 ## Layout
 app/db.py models · app/security.py auth/RBAC/audit · app/vault.py encrypted private docs · app/prep.py checklist+QA+status flow
@@ -22,8 +22,8 @@ app/engine/{eligibility,verification,discovery,advisor,matching}.py · app/seed/
 ## Status vocabulary
 Completed / Partial / Awaiting integration / Awaiting human review / Not implemented — see TODO.md for the live checklist.
 
-Note: no Alembic yet. Schema changes require deleting the dev SQLite file (pathways.db).
+Schema is managed by Alembic (migrations/). After editing app/db.py run `alembic revision --autogenerate -m "msg"` (test_migrations_match_models fails otherwise). Startup applies `upgrade head`. Dev DBs created before migrations existed must be deleted once.
 
 ## Run
-`BOOTSTRAP_ADMIN_EMAIL=.. BOOTSTRAP_ADMIN_PASSWORD=.. uvicorn app.main:app` · `pytest -q` (10 tests passing at last session). SCHEDULER=1 starts the in-process research scheduler.
+`BOOTSTRAP_ADMIN_EMAIL=.. BOOTSTRAP_ADMIN_PASSWORD=.. uvicorn app.main:app` · `pytest -q` (15 tests passing at last session; CI in .github/workflows/ci.yml). SCHEDULER=1 starts the in-process research scheduler.
 Env vars: DATABASE_URL, STORAGE_DIR, DOC_ENCRYPTION_KEY (required in prod), BOOTSTRAP_ADMIN_*.

@@ -86,3 +86,15 @@ def test_matching_explainable():
         m = c.get(f"/api/applicants/{a}/matches", headers=A).json()
         w = [x for x in m if x["title"] == "Welder"][0]
         assert "education >= vocational" in w["gaps"] and "experience >= 2.0y" in w["met"]
+
+
+def test_migrations_match_models():
+    """Fails when someone changes app/db.py without adding a migration."""
+    import pathlib
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from app.db import Base, engine
+    with TestClient(app):  # runs startup => migrations
+        with engine.connect() as conn:
+            diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
+    assert diff == [], diff

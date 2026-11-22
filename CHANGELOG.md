@@ -1,4 +1,6 @@
 # Changelog
+## Session 6
+- Alembic migrations with drift test; CI workflow. 15 tests passing.
 ## Session 5
 - Admin dashboard endpoint and staff/alerts/safety UI; Playwright smoke test (not yet committed as an automated e2e). 14 pytest tests passing.
 ## Session 4
