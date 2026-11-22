@@ -4,7 +4,7 @@ Country-agnostic migration intelligence platform (FastAPI + SQLAlchemy + vanilla
 
 ## Run
     pip install -r requirements.txt
-    ADMIN_TOKEN=change-me uvicorn app.main:app --reload     # http://localhost:8000
+    BOOTSTRAP_ADMIN_EMAIL=you@example.org BOOTSTRAP_ADMIN_PASSWORD="ChangeMe12345" uvicorn app.main:app --reload     # http://localhost:8000
     pytest
 
 ## Design

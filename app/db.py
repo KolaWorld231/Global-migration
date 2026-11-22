@@ -124,3 +124,68 @@ class DiscoveryJob(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
+
+
+# ---------------- Phase 1/5 additions: identity, audit, documents, applications ----------------
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant: Mapped[str] = mapped_column(String(40), default="default", index=True)  # multi-agency readiness
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    pw_hash: Mapped[str] = mapped_column(String(300))
+    role: Mapped[str] = mapped_column(String(40), default="applicant")
+    applicant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    expires: Mapped[datetime] = mapped_column()
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(default=datetime.utcnow, index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(60), index=True)
+    target: Mapped[str] = mapped_column(String(120), default="")
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class Document(Base):
+    """Metadata only; bytes live encrypted in private storage and are never served by a public URL."""
+    __tablename__ = "documents"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    applicant_id: Mapped[int] = mapped_column(Integer, index=True)
+    doc_type: Mapped[str] = mapped_column(String(30))
+    filename: Mapped[str] = mapped_column(String(200))
+    content_type: Mapped[str] = mapped_column(String(80))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    storage_key: Mapped[str] = mapped_column(String(64))
+    issued_on: Mapped[date | None] = mapped_column(nullable=True)
+    expires_on: Mapped[date | None] = mapped_column(nullable=True)
+    retain_until: Mapped[date | None] = mapped_column(nullable=True)
+    scan_status: Mapped[str] = mapped_column(String(20), default="NOT_SCANNED")
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class Application(Base):
+    __tablename__ = "applications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    applicant_id: Mapped[int] = mapped_column(Integer, index=True)
+    pathway_id: Mapped[str] = mapped_column(String(80))
+    opportunity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="PREPARING", index=True)
+    deadline: Mapped[date | None] = mapped_column(nullable=True)
+    submitted_on: Mapped[date | None] = mapped_column(nullable=True)
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    follow_up_on: Mapped[date | None] = mapped_column(nullable=True)
+    authorized: Mapped[bool] = mapped_column(Boolean, default=False)  # applicant authorisation to proceed
+    events: Mapped[list] = mapped_column(JSON, default=list)
+    updated: Mapped[datetime] = mapped_column(default=datetime.utcnow)

@@ -1,11 +1,21 @@
 import os, tempfile
 os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.mkdtemp()}/t.db"
-os.environ["ADMIN_TOKEN"] = "t"
+os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "root@example.org"
+os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "RootPassw0rdX"
+os.environ["STORAGE_DIR"] = tempfile.mkdtemp()
 from datetime import date
 from fastapi.testclient import TestClient
 from app.main import app
 
-H = {"X-Admin-Token": "t"}
+
+def tok(c, email="root@example.org", pw="RootPassw0rdX"):
+    return {"Authorization": "Bearer " + c.post("/api/auth/login", json={"email": email, "password": pw}).json()["token"]}
+
+
+def applicant(c, email):
+    r = c.post("/api/auth/register", json={"email": email, "password": "Applicant123x"}).json()
+    return r["applicant_id"], {"Authorization": "Bearer " + r["token"]}
+
 PROFILE = {"nationality": "LR", "dob": "1995-01-01", "education": {"level": "bachelor"},
            "employment": {"total_years": 4}, "language": {"english_evidence": True},
            "documents": {"passport": True}, "preferences": {"has_job_offer": False}, "financial": {"budget_usd": 2000}}
@@ -13,6 +23,7 @@ PROFILE = {"nationality": "LR", "dob": "1995-01-01", "education": {"level": "bac
 
 def test_flow():
     with TestClient(app) as c:
+        H = tok(c)
         assert len(c.get("/api/countries?role=destination").json()) == 5
         # new country without core changes
         assert c.post("/api/admin/countries", json={"iso2": "DE", "iso3": "DEU", "name": "Germany", "is_destination": True}, headers=H).status_code == 200
@@ -20,16 +31,17 @@ def test_flow():
         # unauthorised
         assert c.post("/api/admin/countries", json={"iso2": "XX", "iso3": "XXX", "name": "x"}).status_code == 401
 
-        aid = c.post("/api/applicants", json={"profile": PROFILE, "consent": {"nationality": "advisor"}}).json()["id"]
-        res = c.get(f"/api/applicants/{aid}/assessment?country=CA").json()
+        aid, A = applicant(c, "a1@example.org")
+        c.put(f"/api/applicants/{aid}", json={"profile": PROFILE, "consent": {"nationality": "advisor"}}, headers=A)
+        res = c.get(f"/api/applicants/{aid}/assessment?country=CA", headers=A).json()
         assert all(r["definitive"] is False for r in res)             # unverified rules => no definitive claim
         assert not any(r["status"] == "POTENTIALLY ELIGIBLE" for r in res)
         # human verifies rules; now definitive
         c.post("/api/admin/pathways/ca-skilled-economic/verify", headers=H)
-        r = [x for x in c.get(f"/api/applicants/{aid}/assessment?country=CA").json() if x["pathway_id"] == "ca-skilled-economic"][0]
+        r = [x for x in c.get(f"/api/applicants/{aid}/assessment?country=CA", headers=A).json() if x["pathway_id"] == "ca-skilled-economic"][0]
         assert r["definitive"] and r["status"] in ("POTENTIALLY ELIGIBLE", "ADDITIONAL REQUIREMENTS NEEDED")
         # advisor respects consent: dob not shared => no age evaluation info leaks
-        adv = c.post(f"/api/applicants/{aid}/advisor", json={"mode": "eligibility", "country": "CA"}).json()
+        adv = c.post(f"/api/applicants/{aid}/advisor", json={"mode": "eligibility", "country": "CA"}, headers=A).json()
         sk = [a for a in adv["assessments"] if a["pathway_id"] == "ca-skilled-economic"][0]
         age_row = [q for q in sk["requirements"] if q["requirement"].startswith("Age")]
         assert age_row and age_row[0]["result"] == "unknown"
@@ -37,6 +49,7 @@ def test_flow():
 
 def test_verification_and_opportunities():
     with TestClient(app) as c:
+        H = tok(c)
         o = c.post("/api/admin/organizations", headers=H, json={
             "name": "FastCash Visas", "category": "recruiter", "country": "CA", "website": "https://fastcashvisas.example",
             "details": {"email": "fastcash@gmail.com", "guarantees_visa": True, "applicant_fee": True}}).json()

@@ -1,5 +1,5 @@
 import os, secrets
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from fastapi import FastAPI, Depends, HTTPException, Header, Query
 from fastapi.staticfiles import StaticFiles
@@ -7,28 +7,23 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from .db import (init_db, SessionLocal, Country, Pathway, Organization, Opportunity, Applicant, Case, DiscoveryJob)
 from .seed.loader import seed
-from .engine import eligibility, verification, advisor, discovery
+from .engine import eligibility, verification, advisor, discovery, matching
+from . import security, vault, prep
+from .security import require, current_user, audit
+from .db import User, AuditLog, Document, Application
+from fastapi import UploadFile, File, Form
 
 app = FastAPI(title="Global Pathways", version="0.1.0")
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN") or secrets.token_urlsafe(16)
-if not os.environ.get("ADMIN_TOKEN"):
-    print(f"[global-pathways] ADMIN_TOKEN not set; generated for this run: {ADMIN_TOKEN}")
-
-
 @app.on_event("startup")
 def _startup():
     init_db()
     seed()
+    bootstrap_admin()
 
 
 def db():
     with SessionLocal() as s:
         yield s
-
-
-def admin(x_admin_token: str = Header(default="")):
-    if not secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
-        raise HTTPException(401, "admin token required")
 
 
 def row(o):
@@ -51,7 +46,7 @@ def countries(role: str | None = None, s=Depends(db)):
     return [row(c) for c in q.all()]
 
 
-@app.post("/api/admin/countries", dependencies=[Depends(admin)])
+@app.post("/api/admin/countries", dependencies=[Depends(require("catalog.manage"))])
 def add_country(c: CountryIn, s=Depends(db)):
     iso = c.iso2.upper()
     if s.get(Country, iso): raise HTTPException(409, "country exists")
@@ -61,7 +56,7 @@ def add_country(c: CountryIn, s=Depends(db)):
     return {"iso2": iso, "active": False, "next": "add pathways, then POST /api/admin/countries/{iso}/activate"}
 
 
-@app.post("/api/admin/countries/{iso}/activate", dependencies=[Depends(admin)])
+@app.post("/api/admin/countries/{iso}/activate", dependencies=[Depends(require("catalog.manage"))])
 def activate(iso: str, active: bool = True, s=Depends(db)):
     c = s.get(Country, iso.upper())
     if not c: raise HTTPException(404)
@@ -74,7 +69,7 @@ def activate(iso: str, active: bool = True, s=Depends(db)):
     return row(c)
 
 
-@app.post("/api/admin/countries/{iso}/verify", dependencies=[Depends(admin)])
+@app.post("/api/admin/countries/{iso}/verify", dependencies=[Depends(require("catalog.verify"))])
 def verify_country(iso: str, reliability: str = "official", s=Depends(db)):
     c = s.get(Country, iso.upper()); c.last_verified = date.today(); c.source_reliability = reliability; s.commit()
     return row(c)
@@ -86,14 +81,14 @@ class PathwayIn(BaseModel):
     fees: dict = {}; excluded_nationalities: list[str] = []; allowed_nationalities: list[str] = []
 
 
-@app.post("/api/admin/pathways", dependencies=[Depends(admin)])
+@app.post("/api/admin/pathways", dependencies=[Depends(require("catalog.manage"))])
 def upsert_pathway(p: PathwayIn, s=Depends(db)):
     if not s.get(Country, p.country.upper()): raise HTTPException(404, "unknown country")
     s.merge(Pathway(**{**p.model_dump(), "country": p.country.upper()})); s.commit()
     return {"ok": True}
 
 
-@app.post("/api/admin/pathways/{pid}/verify", dependencies=[Depends(admin)])
+@app.post("/api/admin/pathways/{pid}/verify", dependencies=[Depends(require("catalog.verify"))])
 def verify_pathway(pid: str, s=Depends(db)):
     """A human attests the requirements were checked against the official source today."""
     p = s.get(Pathway, pid)
@@ -116,7 +111,7 @@ class OrgIn(BaseModel):
     source_urls: list[str] = []; evidence: list[dict] = []; notes: str = ""
 
 
-@app.post("/api/admin/organizations", dependencies=[Depends(admin)])
+@app.post("/api/admin/organizations", dependencies=[Depends(require("org.manage"))])
 def add_org(o: OrgIn, s=Depends(db)):
     org = Organization(**o.model_dump()); s.add(org); s.commit()
     return row(org)
@@ -136,7 +131,7 @@ class EvidenceIn(BaseModel):
     flags: list[str] = []
 
 
-@app.post("/api/admin/organizations/{oid}/evidence", dependencies=[Depends(admin)])
+@app.post("/api/admin/organizations/{oid}/evidence", dependencies=[Depends(require("org.verify"))])
 def add_evidence(oid: int, e: EvidenceIn, s=Depends(db)):
     o = s.get(Organization, oid)
     if not o: raise HTTPException(404)
@@ -148,7 +143,7 @@ def add_evidence(oid: int, e: EvidenceIn, s=Depends(db)):
     return row(o)
 
 
-@app.post("/api/admin/organizations/{oid}/evaluate", dependencies=[Depends(admin)])
+@app.post("/api/admin/organizations/{oid}/evaluate", dependencies=[Depends(require("org.verify"))])
 def evaluate_org(oid: int, s=Depends(db)):
     o = s.get(Organization, oid)
     if not o: raise HTTPException(404)
@@ -157,7 +152,7 @@ def evaluate_org(oid: int, s=Depends(db)):
     return {"organization": row(o), "outcome": out}
 
 
-@app.post("/api/admin/organizations/{oid}/decision", dependencies=[Depends(admin)])
+@app.post("/api/admin/organizations/{oid}/decision", dependencies=[Depends(require("org.verify"))])
 def human_decision(oid: int, status: str, reason: str, s=Depends(db)):
     if status not in {"VERIFIED", "PARTIALLY VERIFIED", "UNVERIFIED", "SUSPICIOUS", "DISQUALIFIED", "INACTIVE", "EXPIRED"}:
         raise HTTPException(422, "bad status")
@@ -179,7 +174,7 @@ class OppIn(BaseModel):
     language_required: dict = {}; deadline: date | None = None; url: str = ""; details: dict = {}
 
 
-@app.post("/api/admin/opportunities", dependencies=[Depends(admin)])
+@app.post("/api/admin/opportunities", dependencies=[Depends(require("opp.manage"))])
 def add_opp(o: OppIn, s=Depends(db)):
     org = s.get(Organization, o.org_id)
     if not org: raise HTTPException(404, "organization not found")
@@ -229,47 +224,125 @@ def search_opps(country: str | None = None, nationality: str | None = None, kind
     return res
 
 
-# ---------- Applicants, assessment, advisor, cases ----------
+# ---------- Auth ----------
+class RegisterIn(BaseModel):
+    email: str; password: str
+
+
+def bootstrap_admin():
+    em, pw = os.environ.get("BOOTSTRAP_ADMIN_EMAIL"), os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
+    if not (em and pw): return
+    with SessionLocal() as s:
+        if not s.query(User).filter_by(email=em.lower()).first():
+            s.add(User(email=em.lower(), pw_hash=security.hash_pw(pw), role="super_admin")); s.commit()
+
+
+@app.post("/api/auth/register")
+def register(r: RegisterIn, s=Depends(db)):
+    security.valid_password(r.password)
+    email = r.email.strip().lower()
+    if "@" not in email or s.query(User).filter_by(email=email).first():
+        raise HTTPException(409, "email invalid or already registered")
+    ap = Applicant(profile={}, consent={}); s.add(ap); s.flush()
+    u = User(email=email, pw_hash=security.hash_pw(r.password), role="applicant", applicant_id=ap.id)
+    s.add(u); s.commit(); audit(s, u.id, "register")
+    return {"token": security.login(s, email, r.password), "applicant_id": ap.id}
+
+
+@app.post("/api/auth/login")
+def do_login(r: RegisterIn, s=Depends(db)):
+    return {"token": security.login(s, r.email, r.password)}
+
+
+@app.post("/api/auth/logout")
+def logout(authorization: str = Header(default=""), s=Depends(db)):
+    security.revoke(s, authorization[7:]); return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(u: User = Depends(current_user)):
+    return {"id": u.id, "email": u.email, "role": u.role, "applicant_id": u.applicant_id,
+            "permissions": sorted(security.PERMS.get(u.role, []))}
+
+
+class StaffIn(BaseModel):
+    email: str; password: str; role: str
+
+
+@app.post("/api/admin/staff")
+def add_staff(b: StaffIn, u: User = Depends(require("user.manage")), s=Depends(db)):
+    if b.role not in security.ROLES or b.role == "applicant": raise HTTPException(422, "bad role")
+    security.valid_password(b.password)
+    s.add(User(email=b.email.lower(), pw_hash=security.hash_pw(b.password), role=b.role)); s.commit()
+    audit(s, u.id, "staff_created", b.email, role=b.role)
+    return {"ok": True}
+
+
+@app.get("/api/admin/audit")
+def audit_log(limit: int = 100, u: User = Depends(require("audit.read")), s=Depends(db)):
+    return [row(a) | {"ts": a.ts.isoformat()} for a in s.query(AuditLog).order_by(AuditLog.id.desc()).limit(min(limit, 500))]
+
+
+# ---------- Applicants, assessment, advisor ----------
+def owned(aid: int, u: User, s, write=False):
+    if u.applicant_id == aid or (not write and security.can_access_applicant(u, aid)):
+        ap = s.get(Applicant, aid)
+        if ap:
+            if u.applicant_id != aid: audit(s, u.id, "applicant_viewed", aid)
+            return ap
+    raise HTTPException(404)  # 404, not 403: do not reveal existence
+
+
 class ApplicantIn(BaseModel):
     profile: dict[str, Any] = {}
     consent: dict[str, str] = {}
 
 
-@app.post("/api/applicants")
-def create_applicant(a: ApplicantIn, s=Depends(db)):
-    ap = Applicant(profile=a.profile, consent=a.consent); s.add(ap); s.commit()
-    return {"id": ap.id}
-
-
 @app.put("/api/applicants/{aid}")
-def update_applicant(aid: int, a: ApplicantIn, s=Depends(db)):
-    ap = s.get(Applicant, aid)
-    if not ap: raise HTTPException(404)
+def update_applicant(aid: int, a: ApplicantIn, u: User = Depends(current_user), s=Depends(db)):
+    ap = owned(aid, u, s, write=True)
     ap.profile = {**ap.profile, **a.profile}; ap.consent = {**ap.consent, **a.consent}; s.commit()
+    audit(s, u.id, "profile_updated", aid, consent_keys=sorted(a.consent))
     return {"id": ap.id, "profile": ap.profile, "consent": ap.consent}
 
 
 @app.get("/api/applicants/{aid}")
-def get_applicant(aid: int, s=Depends(db)):
-    ap = s.get(Applicant, aid)
-    if not ap: raise HTTPException(404)
+def get_applicant(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    ap = owned(aid, u, s)
     return {"id": ap.id, "profile": ap.profile, "consent": ap.consent}
 
 
 @app.delete("/api/applicants/{aid}")
-def delete_applicant(aid: int, s=Depends(db)):
-    ap = s.get(Applicant, aid)
-    if ap:
-        s.query(Case).filter_by(applicant_id=aid).delete(); s.delete(ap); s.commit()
+def delete_applicant(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    ap = owned(aid, u, s, write=True)
+    for d in s.query(Document).filter_by(applicant_id=aid):
+        vault.remove(d.storage_key); s.delete(d)
+    s.query(Case).filter_by(applicant_id=aid).delete(); s.query(Application).filter_by(applicant_id=aid).delete()
+    s.query(User).filter_by(applicant_id=aid).delete(); s.delete(ap); s.commit()
+    audit(s, None, "applicant_deleted", aid)
     return {"deleted": True}
 
 
+@app.get("/api/applicants/{aid}/export")
+def export_applicant(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    ap = owned(aid, u, s, write=True)
+    audit(s, u.id, "data_exported", aid)
+    return {"profile": ap.profile, "consent": ap.consent,
+            "documents": [row(d) for d in s.query(Document).filter_by(applicant_id=aid, deleted=False)],
+            "applications": [row(x) for x in s.query(Application).filter_by(applicant_id=aid)]}
+
+
 @app.get("/api/applicants/{aid}/assessment")
-def assessment(aid: int, country: str | None = None, s=Depends(db)):
-    ap = s.get(Applicant, aid)
-    if not ap: raise HTTPException(404)
+def assessment(aid: int, country: str | None = None, u: User = Depends(current_user), s=Depends(db)):
+    ap = owned(aid, u, s)
     pws = s.query(Pathway).join(Country, Country.iso2 == Pathway.country).filter(Country.active.is_(True)).all()
     return eligibility.assess_all(pws, ap.profile, country.upper() if country else None)
+
+
+@app.get("/api/applicants/{aid}/matches")
+def matches(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    ap = owned(aid, u, s)
+    return matching.match(s, ap.profile)
 
 
 class AdviceIn(BaseModel):
@@ -277,48 +350,142 @@ class AdviceIn(BaseModel):
 
 
 @app.post("/api/applicants/{aid}/advisor")
-def advise(aid: int, body: AdviceIn, s=Depends(db)):
-    ap = s.get(Applicant, aid)
-    if not ap: raise HTTPException(404)
+def advise(aid: int, body: AdviceIn, u: User = Depends(current_user), s=Depends(db)):
+    ap = owned(aid, u, s)
     if body.mode not in advisor.MODES: raise HTTPException(422, f"mode must be one of {advisor.MODES}")
-    # Advisor sees only fields the applicant opted in to share.
     return advisor.answer(s, body.mode, ap.profile, ap.consent, country=body.country, pathway_id=body.pathway_id)
 
 
-@app.post("/api/applicants/{aid}/cases/{pid}")
-def open_case(aid: int, pid: str, s=Depends(db)):
-    p = s.get(Pathway, pid)
-    if not p or not s.get(Applicant, aid): raise HTTPException(404)
-    c = Case(applicant_id=aid, pathway_id=pid, checklist={d: "NOT_STARTED" for d in p.documents}, log=[])
-    s.add(c); s.commit()
-    return row(c)
+# ---------- Documents (private vault) ----------
+def can_read_docs(u: User, aid: int, s) -> bool:
+    if u.applicant_id == aid: return True
+    ap = s.get(Applicant, aid)
+    return "document.read" in security.PERMS.get(u.role, set()) and ap and ap.consent.get("documents_staff") == "share"
 
 
-@app.get("/api/applicants/{aid}/cases")
-def cases(aid: int, s=Depends(db)):
-    return [row(c) for c in s.query(Case).filter_by(applicant_id=aid)]
+@app.post("/api/applicants/{aid}/documents")
+async def upload_doc(aid: int, doc_type: str = Form(...), expires_on: date | None = Form(None),
+                     file: UploadFile = File(...), u: User = Depends(current_user), s=Depends(db)):
+    owned(aid, u, s, write=True)
+    if doc_type not in vault.DOC_TYPES: raise HTTPException(422, f"doc_type must be one of {vault.DOC_TYPES}")
+    data = await file.read(vault.MAX_BYTES + 1)
+    try: ctype = vault.validate(file.filename or "", data)
+    except ValueError as e: raise HTTPException(422, str(e))
+    import hashlib
+    d = Document(applicant_id=aid, doc_type=doc_type, filename=vault.safe_name(file.filename), content_type=ctype,
+                 size=len(data), sha256=hashlib.sha256(data).hexdigest(), storage_key=vault.put(data),
+                 expires_on=expires_on, scan_status=vault.scan(data))
+    s.add(d); s.commit(); audit(s, u.id, "document_uploaded", d.id, type=doc_type)
+    return row(d) | {"note": "Stored encrypted. Scan status NOT_SCANNED means no malware scanner is configured."}
 
 
-STAGES = ["PLANNING", "DOCUMENTS", "SUBMITTED", "DECISION", "CLOSED"]
+@app.get("/api/applicants/{aid}/documents")
+def list_docs(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    owned(aid, u, s)  # metadata visible to staff with applicant.read; content is not
+    return [row(d) for d in s.query(Document).filter_by(applicant_id=aid, deleted=False)]
 
 
-@app.patch("/api/cases/{cid}")
-def update_case(cid: int, stage: str | None = None, document: str | None = None, doc_status: str | None = None,
-                s=Depends(db)):
-    c = s.get(Case, cid)
-    if not c: raise HTTPException(404)
-    if stage:
-        if stage not in STAGES: raise HTTPException(422, f"stage must be one of {STAGES}")
-        c.stage = stage; c.log = [*c.log, f"{date.today()}: stage -> {stage}"]
-    if document:
-        if document not in c.checklist: raise HTTPException(422, "unknown document")
-        c.checklist = {**c.checklist, document: doc_status or "DONE"}
-    s.commit()
-    return row(c)
+@app.get("/api/documents/{did}/content")
+def doc_content(did: int, u: User = Depends(current_user), s=Depends(db)):
+    from fastapi.responses import Response
+    d = s.get(Document, did)
+    if not d or d.deleted or not can_read_docs(u, d.applicant_id, s):
+        if d: audit(s, u.id, "document_denied", did)
+        raise HTTPException(404)
+    audit(s, u.id, "document_read", did)
+    return Response(vault.get(d.storage_key), media_type=d.content_type,
+                    headers={"Content-Disposition": f'attachment; filename="{d.filename}"', "Cache-Control": "no-store",
+                             "X-Content-Type-Options": "nosniff"})
+
+
+@app.delete("/api/documents/{did}")
+def delete_doc(did: int, u: User = Depends(current_user), s=Depends(db)):
+    d = s.get(Document, did)
+    if not d or d.applicant_id != u.applicant_id: raise HTTPException(404)
+    vault.remove(d.storage_key); d.deleted = True; s.commit(); audit(s, u.id, "document_deleted", did)
+    return {"deleted": True}
+
+
+# ---------- Application preparation ----------
+class AppIn(BaseModel):
+    pathway_id: str; opportunity_id: int | None = None; deadline: date | None = None
+
+
+def my_app(aid: int, u: User, s) -> Application:
+    a = s.get(Application, aid)
+    if not a or a.applicant_id != u.applicant_id: raise HTTPException(404)
+    return a
+
+
+def log_event(a, kind, **kw):
+    a.events = [*a.events, {"at": datetime.utcnow().isoformat(timespec="seconds"), "event": kind, **kw}]
+    a.updated = datetime.utcnow()
+
+
+@app.post("/api/applications")
+def create_application(b: AppIn, u: User = Depends(current_user), s=Depends(db)):
+    if u.applicant_id is None or not s.get(Pathway, b.pathway_id): raise HTTPException(404)
+    dl = b.deadline
+    if b.opportunity_id:
+        o = s.get(Opportunity, b.opportunity_id)
+        if not o: raise HTTPException(404, "opportunity not found")
+        dl = dl or o.deadline
+    a = Application(applicant_id=u.applicant_id, pathway_id=b.pathway_id, opportunity_id=b.opportunity_id, deadline=dl, events=[])
+    log_event(a, "created"); s.add(a); s.commit()
+    return row(a)
+
+
+@app.get("/api/applications")
+def my_applications(u: User = Depends(current_user), s=Depends(db)):
+    return [row(a) for a in s.query(Application).filter_by(applicant_id=u.applicant_id)]
+
+
+@app.get("/api/applications/{aid}/checklist")
+def app_checklist(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    a = my_app(aid, u, s)
+    docs = s.query(Document).filter_by(applicant_id=a.applicant_id, deleted=False).all()
+    return {"checklist": prep.checklist(s.get(Pathway, a.pathway_id), docs),
+            "official_url": s.get(Pathway, a.pathway_id).official_url}
+
+
+@app.post("/api/applications/{aid}/authorize")
+def authorize(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    a = my_app(aid, u, s); a.authorized = True; log_event(a, "applicant_authorized_preparation")
+    s.commit(); audit(s, u.id, "application_authorized", aid); return row(a)
+
+
+@app.get("/api/applications/{aid}/quality")
+def app_quality(aid: int, u: User = Depends(current_user), s=Depends(db)):
+    a = my_app(aid, u, s)
+    docs = s.query(Document).filter_by(applicant_id=a.applicant_id, deleted=False).all()
+    return prep.quality_check(a, s.get(Pathway, a.pathway_id), s.get(Applicant, a.applicant_id).profile, docs)
+
+
+class StatusIn(BaseModel):
+    status: str; reference: str = ""; follow_up_on: date | None = None; note: str = ""
+
+
+@app.post("/api/applications/{aid}/status")
+def set_status(aid: int, b: StatusIn, u: User = Depends(current_user), s=Depends(db)):
+    """Applicants RECORD what happened on the official portal. The platform never submits on their behalf."""
+    a = my_app(aid, u, s)
+    if b.status not in prep.ALLOWED_NEXT.get(a.status, set()):
+        raise HTTPException(422, f"cannot move from {a.status} to {b.status}")
+    if b.status == "READY":
+        docs = s.query(Document).filter_by(applicant_id=a.applicant_id, deleted=False).all()
+        qa = prep.quality_check(a, s.get(Pathway, a.pathway_id), s.get(Applicant, a.applicant_id).profile, docs)
+        if not qa["ready"]: raise HTTPException(422, {"message": "quality check has blockers", "issues": qa["issues"]})
+    if b.status == "SUBMITTED":
+        a.submitted_on = date.today()
+    a.status = b.status
+    a.reference = b.reference or a.reference; a.follow_up_on = b.follow_up_on or a.follow_up_on
+    log_event(a, f"status:{b.status}", note=b.note, reference=b.reference)
+    s.commit(); audit(s, u.id, "application_status", aid, status=b.status)
+    return row(a)
 
 
 # ---------- Discovery (admin) ----------
-@app.post("/api/admin/discovery/{iso}", dependencies=[Depends(admin)])
+@app.post("/api/admin/discovery/{iso}", dependencies=[Depends(require("research.run"))])
 def discover(iso: str, s=Depends(db)):
     c = s.get(Country, iso.upper())
     if not c: raise HTTPException(404)
@@ -327,7 +494,7 @@ def discover(iso: str, s=Depends(db)):
     return row(job)
 
 
-@app.get("/api/admin/review-queue", dependencies=[Depends(admin)])
+@app.get("/api/admin/review-queue", dependencies=[Depends(require("org.verify"))])
 def review_queue(s=Depends(db)):
     return [row(o) for o in s.query(Organization).filter_by(needs_human_review=True)]
 
