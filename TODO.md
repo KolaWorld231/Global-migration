@@ -17,11 +17,13 @@ Order: 1) verification+research engine and country foundation (in progress) → 
 ## Phase 2 Country intelligence
 - [x] 5 destinations + 8 origin markets as data; admin add/activate/verify country & pathways; expansion test
 - [h] All seeded pathway requirements are DRAFT: each needs checking against official sources
-- [ ] Regulatory change records with version history; source snapshots; policy-source monitoring
+- [~] Regulatory changes + immutable snapshots + review (CONFIRMED_IMPACT forces pathway re-verification); [ ] structured previous/new values, effective dates, affected-applicant identification, notifications
 - [ ] Country-specific nationality/country-of-application restrictions research
 ## Phase 3 Organizations/opportunities
 - [x] Verification engine, evidence, human decision, review queue, opportunity inheritance, filters
-- [~] Discovery framework (robots.txt, rate limit); only a source-reachability adapter. [ ] real adapters, dedupe, scheduler, retry/dead-letter
+- [x] Research pipeline: source registry (hierarchy levels), page snapshots + change detection -> regulatory change review, RSS/Atom feed leads with URL dedupe, retry/dead-letter, due-source scheduler (SCHEDULER=1), all via robots-aware fetcher. Tested with mocked fetch only; NOT yet exercised against live sites
+- [i] Source-specific adapters (employer career portals, scholarship portals, licence registers) and AI extraction of opportunities from leads: [ ] not implemented
+- [ ] Organization/opportunity dedupe (lead dedupe by URL only)
 - [ ] Organization contacts/recruitment portal/benefit fields as first-class columns (currently in details JSON)
 ## Phase 4 Applicant experience
 - [x] Register/login, profile with per-field consent, multi-country assessment, advisor (rule-based), matches
@@ -30,4 +32,5 @@ Order: 1) verification+research engine and country foundation (in progress) → 
 - [x] Encrypted private document vault, applications, checklist, QA, status flow, applicant authorisation, export & deletion
 - [i] Malware scanning (ClamAV adapter) · [ ] AI document extraction · CV/letter drafting · [ ] staff case management (assign, tasks, notes, consultations)
 ## Phase 6-8 Automation, notifications, analytics, billing, i18n, workflow builder, fraud module, compliance pages, admin dashboard modules
-- [ ] Not started (fraud reporting/investigation is high priority next after verification work)
+- [ ] Not started (fraud module done: see below; next: notifications, case management, admin dashboard)
+- [x] Fraud: offer text indicator checker (public), user reports (no public labelling), investigation workflow, confirmed => DISQUALIFIED with evidence note. [ ] link-/domain-level checks, report deduplication, reporter protection policy

@@ -9,6 +9,8 @@ from .db import (init_db, SessionLocal, Country, Pathway, Organization, Opportun
 from .seed.loader import seed
 from .engine import eligibility, verification, advisor, discovery, matching
 from . import security, vault, prep
+from .engine import fraud, research
+from .db import ResearchSource, ResearchRun, ResearchResult, RegulatoryChange, SourceSnapshot, FraudReport
 from .security import require, current_user, audit
 from .db import User, AuditLog, Document, Application
 from fastapi import UploadFile, File, Form
@@ -19,6 +21,14 @@ def _startup():
     init_db()
     seed()
     bootstrap_admin()
+    if os.environ.get("SCHEDULER") == "1":
+        import threading, time
+        def loop():
+            while True:
+                try: research.run_due()
+                except Exception as e: print('[scheduler]', e)
+                time.sleep(900)
+        threading.Thread(target=loop, daemon=True).start()
 
 
 def db():
@@ -497,6 +507,150 @@ def discover(iso: str, s=Depends(db)):
 @app.get("/api/admin/review-queue", dependencies=[Depends(require("org.verify"))])
 def review_queue(s=Depends(db)):
     return [row(o) for o in s.query(Organization).filter_by(needs_human_review=True)]
+
+
+# ---------- Research pipeline ----------
+class SourceIn(BaseModel):
+    country: str; title: str; url: str; kind: str = "page"; level: int = 1
+    policy_area: str = "general"; interval_hours: int = 168
+
+
+@app.post("/api/admin/research/sources")
+def add_source(b: SourceIn, u: User = Depends(require("research.run")), s=Depends(db)):
+    if b.kind not in ("page", "feed") or not 1 <= b.level <= 5 or not b.url.startswith("https://"):
+        raise HTTPException(422, "kind page|feed, level 1-5, https URL required")
+    if not s.get(Country, b.country.upper()): raise HTTPException(404, "unknown country")
+    src = ResearchSource(**{**b.model_dump(), "country": b.country.upper()}); s.add(src); s.commit()
+    audit(s, u.id, "source_added", b.url); return row(src)
+
+
+@app.get("/api/admin/research/sources")
+def list_sources(u: User = Depends(require("research.run")), s=Depends(db)):
+    now = datetime.utcnow()
+    out = []
+    for x in s.query(ResearchSource):
+        r = row(x)
+        r["stale"] = x.last_ok is None or (now - x.last_ok).total_seconds() > 2 * x.interval_hours * 3600
+        out.append(r)
+    return out
+
+
+@app.post("/api/admin/research/sources/{sid}/run")
+def run_source_now(sid: int, u: User = Depends(require("research.run")), s=Depends(db)):
+    if not s.get(ResearchSource, sid): raise HTTPException(404)
+    rid = research.execute(sid)
+    audit(s, u.id, "research_run", sid)
+    return row(s.get(ResearchRun, rid)) if rid else {}
+
+
+@app.get("/api/admin/research/runs")
+def runs(status: str | None = None, u: User = Depends(require("research.run")), s=Depends(db)):
+    q = s.query(ResearchRun).order_by(ResearchRun.id.desc())
+    return [row(r) for r in (q.filter_by(status=status) if status else q).limit(200)]
+
+
+@app.post("/api/admin/research/runs/{rid}/retry")
+def retry_run(rid: int, u: User = Depends(require("research.run")), s=Depends(db)):
+    st = research.retry(rid)
+    if st is None: raise HTTPException(422, "only FAILED runs can be retried")
+    return {"status": st}
+
+
+@app.get("/api/admin/research/results")
+def results(status: str = "NEEDS_REVIEW", u: User = Depends(require("research.review")), s=Depends(db)):
+    return [row(r) for r in s.query(ResearchResult).filter_by(status=status).limit(200)]
+
+
+@app.post("/api/admin/research/results/{rid}/review")
+def review_result(rid: int, decision: str, u: User = Depends(require("research.review")), s=Depends(db)):
+    if decision not in ("APPROVED", "REJECTED"): raise HTTPException(422, "APPROVED or REJECTED")
+    r = s.get(ResearchResult, rid)
+    if not r: raise HTTPException(404)
+    r.status, r.reviewer = decision, u.email; s.commit(); audit(s, u.id, "result_reviewed", rid, decision=decision)
+    return row(r)
+
+
+@app.get("/api/admin/regulatory-changes")
+def reg_changes(status: str = "PENDING_REVIEW", u: User = Depends(require("catalog.verify")), s=Depends(db)):
+    return [row(c) for c in s.query(RegulatoryChange).filter_by(review_status=status)]
+
+
+@app.post("/api/admin/regulatory-changes/{cid}/review")
+def review_change(cid: int, decision: str, note: str = "", u: User = Depends(require("catalog.verify")), s=Depends(db)):
+    """CONFIRMED_IMPACT marks the country's pathways as needing re-verification (nothing is silently overwritten)."""
+    if decision not in ("CONFIRMED_IMPACT", "NO_IMPACT"): raise HTTPException(422, "CONFIRMED_IMPACT or NO_IMPACT")
+    c = s.get(RegulatoryChange, cid)
+    if not c: raise HTTPException(404)
+    c.review_status, c.reviewer_note = decision, note
+    if decision == "CONFIRMED_IMPACT":
+        for p in s.query(Pathway).filter_by(country=c.country): p.last_verified = None
+    s.commit(); audit(s, u.id, "regulatory_change_reviewed", cid, decision=decision)
+    return row(c)
+
+
+@app.get("/api/admin/snapshots/{sid}")
+def snapshot(sid: int, u: User = Depends(require("catalog.verify")), s=Depends(db)):
+    x = s.get(SourceSnapshot, sid)
+    if not x: raise HTTPException(404)
+    return row(x)
+
+
+# ---------- Fraud prevention ----------
+class CheckIn(BaseModel):
+    text: str
+
+
+@app.post("/api/fraud/check")
+def fraud_check(b: CheckIn):
+    """Public: paste an offer/message to see warning indicators. Nothing is stored."""
+    hits = fraud.scan_text(b.text[:20000])
+    return {"indicators": hits, "notices": fraud.NOTICES,
+            "note": "Indicators are warnings, not proof. Absence of warnings does not mean an offer is genuine."}
+
+
+class ReportIn(BaseModel):
+    subject: str; category: str; description: str; org_id: int | None = None; evidence_url: str = ""
+
+
+@app.post("/api/fraud/reports")
+def report_fraud(b: ReportIn, u: User = Depends(current_user), s=Depends(db)):
+    if b.category not in fraud.CATEGORIES: raise HTTPException(422, f"category must be one of {sorted(fraud.CATEGORIES)}")
+    r = FraudReport(reporter_id=u.id, indicators=[h["indicator"] for h in fraud.scan_text(b.description)], **b.model_dump())
+    s.add(r)
+    if b.org_id and (o := s.get(Organization, b.org_id)):
+        o.needs_human_review = True  # internal flag only; public status is NOT changed by an unverified report
+    s.commit(); audit(s, u.id, "fraud_reported", r.id)
+    return {"id": r.id, "status": r.status, "note": "Thank you. Staff will investigate. Reports do not publicly label anyone until reviewed."}
+
+
+@app.get("/api/admin/fraud/reports")
+def fraud_queue(status: str | None = None, u: User = Depends(require("fraud.investigate")), s=Depends(db)):
+    q = s.query(FraudReport)
+    return [row(r) for r in (q.filter_by(status=status) if status else q)]
+
+
+class FraudUpdate(BaseModel):
+    status: str; note: str = ""
+
+
+@app.post("/api/admin/fraud/reports/{rid}")
+def fraud_update(rid: int, b: FraudUpdate, u: User = Depends(require("fraud.investigate")), s=Depends(db)):
+    if b.status not in ("INVESTIGATING", "CONFIRMED", "DISMISSED"): raise HTTPException(422, "bad status")
+    r = s.get(FraudReport, rid)
+    if not r: raise HTTPException(404)
+    if b.status == "CONFIRMED" and not b.note.strip(): raise HTTPException(422, "confirmation requires an evidence note")
+    r.status = b.status
+    r.notes = [*r.notes, {"by": u.email, "at": datetime.utcnow().isoformat(timespec="seconds"), "status": b.status, "note": b.note}]
+    if b.status == "CONFIRMED" and r.org_id and (o := s.get(Organization, r.org_id)):
+        o.status, o.needs_human_review = "DISQUALIFIED", False
+        o.evidence = [*o.evidence, {"type": "human_review", "note": f"fraud report {rid} confirmed: {b.note}", "date": date.today().isoformat()}]
+    s.commit(); audit(s, u.id, "fraud_report_updated", rid, status=b.status)
+    return row(r)
+
+
+@app.get("/api/safety-notices")
+def notices():
+    return {"notices": fraud.NOTICES}
 
 
 @app.get("/")

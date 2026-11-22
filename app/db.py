@@ -189,3 +189,87 @@ class Application(Base):
     authorized: Mapped[bool] = mapped_column(Boolean, default=False)  # applicant authorisation to proceed
     events: Mapped[list] = mapped_column(JSON, default=list)
     updated: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+# ---------------- Research pipeline & fraud ----------------
+class ResearchSource(Base):
+    """Registry of permitted sources. `level` follows the source hierarchy (1 = official government ... 5 = community)."""
+    __tablename__ = "research_sources"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    country: Mapped[str] = mapped_column(String(2), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    url: Mapped[str] = mapped_column(String(500), unique=True)
+    kind: Mapped[str] = mapped_column(String(10), default="page")  # page | feed
+    level: Mapped[int] = mapped_column(Integer, default=1)
+    policy_area: Mapped[str] = mapped_column(String(60), default="general")
+    interval_hours: Mapped[int] = mapped_column(Integer, default=168)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_run: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_ok: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class SourceSnapshot(Base):
+    """Immutable: never overwritten, giving version history for regulatory monitoring."""
+    __tablename__ = "source_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    fetched: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    sha256: Mapped[str] = mapped_column(String(64))
+    text: Mapped[str] = mapped_column(Text, default="")
+
+
+class RegulatoryChange(Base):
+    __tablename__ = "regulatory_changes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    country: Mapped[str] = mapped_column(String(2), index=True)
+    policy_area: Mapped[str] = mapped_column(String(60))
+    previous_snapshot: Mapped[int] = mapped_column(Integer)
+    new_snapshot: Mapped[int] = mapped_column(Integer)
+    detected: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    review_status: Mapped[str] = mapped_column(String(20), default="PENDING_REVIEW")
+    reviewer_note: Mapped[str] = mapped_column(Text, default="")
+
+
+class ResearchResult(Base):
+    """A candidate lead. Never published automatically; needs review according to approval rules."""
+    __tablename__ = "research_results"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    country: Mapped[str] = mapped_column(String(2), index=True)
+    title: Mapped[str] = mapped_column(String(400))
+    url: Mapped[str] = mapped_column(String(600))
+    url_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    published: Mapped[str] = mapped_column(String(60), default="")
+    accessed: Mapped[date] = mapped_column(default=date.today)
+    excerpt: Mapped[str] = mapped_column(Text, default="")
+    source_level: Mapped[int] = mapped_column(Integer, default=5)
+    status: Mapped[str] = mapped_column(String(20), default="NEEDS_REVIEW")  # NEEDS_REVIEW|APPROVED|REJECTED
+    reviewer: Mapped[str] = mapped_column(String(120), default="")
+
+
+class ResearchRun(Base):
+    __tablename__ = "research_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    status: Mapped[str] = mapped_column(String(10), default="PENDING")  # PENDING|OK|FAILED|DEAD
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class FraudReport(Base):
+    __tablename__ = "fraud_reports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reporter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    org_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    category: Mapped[str] = mapped_column(String(40))
+    description: Mapped[str] = mapped_column(Text)
+    evidence_url: Mapped[str] = mapped_column(String(500), default="")
+    indicators: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="NEW", index=True)
+    notes: Mapped[list] = mapped_column(JSON, default=list)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)

@@ -1,6 +1,6 @@
 import json, pathlib
 from datetime import date
-from ..db import SessionLocal, Country, Pathway, Organization
+from ..db import SessionLocal, Country, Pathway, Organization, ResearchSource
 
 SEED = pathlib.Path(__file__).with_name("countries.json")
 
@@ -26,6 +26,8 @@ def seed():
             s.add(Organization(name=cfg["authority"], category="government", country=iso2,
                                website=cfg["official_sites"][0], source_urls=cfg["official_sites"],
                                status="UNVERIFIED", notes="Seeded from configuration; verify via official sources."))
+            for u in cfg["official_sites"]:
+                s.add(ResearchSource(country=iso2, title=f"{cfg['authority']} (official)", url=u, level=1, policy_area="general"))
             for p in c["pathways"]:
                 s.merge(Pathway(**{k: v for k, v in p.items() if k != "last_verified"}))
         for iso2, o in d["origins"].items():

@@ -24,7 +24,10 @@ PERMS = {
     "auditor": {"audit.read"},
     "applicant": set(),
 }
-PERMS["super_admin"] |= {"catalog.verify"}
+PERMS["super_admin"] |= {"catalog.verify", "fraud.investigate"}
+PERMS["compliance_reviewer"] |= {"fraud.investigate", "research.review"}
+PERMS["super_admin"] |= {"research.review"}
+PERMS["research_analyst"] |= {"research.review"}
 ROLES = set(PERMS)
 
 
