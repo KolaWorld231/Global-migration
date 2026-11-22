@@ -102,15 +102,65 @@ class Applicant(Base):
 
 
 class Case(Base):
-    """Application/case tracking: one per applicant+pathway."""
+    """One central case per applicant. Stage list is configurable (Setting 'case_stages')."""
     __tablename__ = "cases"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    applicant_id: Mapped[int] = mapped_column(Integer, index=True)
-    pathway_id: Mapped[str] = mapped_column(String(80))
-    stage: Mapped[str] = mapped_column(String(30), default="PLANNING")
-    checklist: Mapped[dict] = mapped_column(JSON, default=dict)  # document -> status
-    log: Mapped[list] = mapped_column(JSON, default=list)
+    applicant_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    stage: Mapped[str] = mapped_column(String(40), default="NEW_APPLICANT", index=True)
+    assigned_to: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    history: Mapped[list] = mapped_column(JSON, default=list)  # [{stage, at, by}]
     updated: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class CaseNote(Base):  # internal only; never shown to applicants
+    __tablename__ = "case_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(Integer, index=True)
+    author_id: Mapped[int] = mapped_column(Integer)
+    body: Mapped[str] = mapped_column(Text)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(Integer, index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    assignee_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    due: Mapped[date | None] = mapped_column(nullable=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class Communication(Base):
+    __tablename__ = "communications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(Integer, index=True)
+    channel: Mapped[str] = mapped_column(String(20))
+    direction: Mapped[str] = mapped_column(String(10))  # inbound|outbound
+    summary: Mapped[str] = mapped_column(Text)
+    author_id: Mapped[int] = mapped_column(Integer)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    dedupe_key: Mapped[str] = mapped_column(String(160), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, default="")
+    critical: Mapped[bool] = mapped_column(Boolean, default=False)
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_status: Mapped[str] = mapped_column(String(20), default="NOT_REQUESTED")  # QUEUED|SENT|NOT_CONFIGURED|...
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 
 class DiscoveryJob(Base):

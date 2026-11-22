@@ -22,6 +22,8 @@ app/engine/{eligibility,verification,discovery,advisor,matching}.py · app/seed/
 ## Status vocabulary
 Completed / Partial / Awaiting integration / Awaiting human review / Not implemented — see TODO.md for the live checklist.
 
+Note: no Alembic yet. Schema changes require deleting the dev SQLite file (pathways.db).
+
 ## Run
 `BOOTSTRAP_ADMIN_EMAIL=.. BOOTSTRAP_ADMIN_PASSWORD=.. uvicorn app.main:app` · `pytest -q` (10 tests passing at last session). SCHEDULER=1 starts the in-process research scheduler.
 Env vars: DATABASE_URL, STORAGE_DIR, DOC_ENCRYPTION_KEY (required in prod), BOOTSTRAP_ADMIN_*.

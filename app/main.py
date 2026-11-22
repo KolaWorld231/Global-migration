@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from .db import (init_db, SessionLocal, Country, Pathway, Organization, Opportunity, Applicant, Case, DiscoveryJob)
 from .seed.loader import seed
 from .engine import eligibility, verification, advisor, discovery, matching
-from . import security, vault, prep
+from . import security, vault, prep, notify
+from .db import Notification, CaseNote, Task, Communication, Setting
 from .engine import fraud, research
 from .db import ResearchSource, ResearchRun, ResearchResult, RegulatoryChange, SourceSnapshot, FraudReport
 from .security import require, current_user, audit
@@ -25,7 +26,9 @@ def _startup():
         import threading, time
         def loop():
             while True:
-                try: research.run_due()
+                try:
+                    research.run_due()
+                    with SessionLocal() as s: notify.scan(s)
                 except Exception as e: print('[scheduler]', e)
                 time.sleep(900)
         threading.Thread(target=loop, daemon=True).start()
@@ -255,7 +258,7 @@ def register(r: RegisterIn, s=Depends(db)):
         raise HTTPException(409, "email invalid or already registered")
     ap = Applicant(profile={}, consent={}); s.add(ap); s.flush()
     u = User(email=email, pw_hash=security.hash_pw(r.password), role="applicant", applicant_id=ap.id)
-    s.add(u); s.commit(); audit(s, u.id, "register")
+    s.add(u); s.add(Case(applicant_id=ap.id, history=[{"stage": "NEW_APPLICANT", "at": datetime.utcnow().isoformat(timespec="seconds"), "by": None}])); s.commit(); audit(s, u.id, "register")
     return {"token": security.login(s, email, r.password), "applicant_id": ap.id}
 
 
@@ -327,7 +330,12 @@ def delete_applicant(aid: int, u: User = Depends(current_user), s=Depends(db)):
     ap = owned(aid, u, s, write=True)
     for d in s.query(Document).filter_by(applicant_id=aid):
         vault.remove(d.storage_key); s.delete(d)
-    s.query(Case).filter_by(applicant_id=aid).delete(); s.query(Application).filter_by(applicant_id=aid).delete()
+    c = s.query(Case).filter_by(applicant_id=aid).first()
+    if c:
+        for M in (CaseNote, Task, Communication): s.query(M).filter_by(case_id=c.id).delete()
+        s.delete(c)
+    s.query(Notification).filter(Notification.user_id.in_([x.id for x in s.query(User).filter_by(applicant_id=aid)] or [-1])).delete()
+    s.query(Application).filter_by(applicant_id=aid).delete()
     s.query(User).filter_by(applicant_id=aid).delete(); s.delete(ap); s.commit()
     audit(s, None, "applicant_deleted", aid)
     return {"deleted": True}
@@ -584,6 +592,7 @@ def review_change(cid: int, decision: str, note: str = "", u: User = Depends(req
     c.review_status, c.reviewer_note = decision, note
     if decision == "CONFIRMED_IMPACT":
         for p in s.query(Pathway).filter_by(country=c.country): p.last_verified = None
+        s.flush(); notify.notify_country_change(s, c.country)
     s.commit(); audit(s, u.id, "regulatory_change_reviewed", cid, decision=decision)
     return row(c)
 
@@ -651,6 +660,175 @@ def fraud_update(rid: int, b: FraudUpdate, u: User = Depends(require("fraud.inve
 @app.get("/api/safety-notices")
 def notices():
     return {"notices": fraud.NOTICES}
+
+
+# ---------- Notifications ----------
+@app.get("/api/notifications")
+def my_notifications(unread: bool = False, u: User = Depends(current_user), s=Depends(db)):
+    q = s.query(Notification).filter_by(user_id=u.id).order_by(Notification.id.desc())
+    return [row(n) for n in (q.filter_by(read=False) if unread else q).limit(100)]
+
+
+@app.post("/api/notifications/{nid}/read")
+def read_notification(nid: int, u: User = Depends(current_user), s=Depends(db)):
+    n = s.get(Notification, nid)
+    if not n or n.user_id != u.id: raise HTTPException(404)
+    n.read = True; s.commit(); return row(n)
+
+
+@app.get("/api/notification-prefs")
+def get_prefs(u: User = Depends(current_user), s=Depends(db)):
+    return notify.prefs(s, u.id) | {"note": "Critical application, deadline, document and rule-change alerts cannot be switched off."}
+
+
+@app.put("/api/notification-prefs")
+def put_prefs(b: dict[str, bool], u: User = Depends(current_user), s=Depends(db)):
+    return notify.set_prefs(s, u.id, b)
+
+
+@app.post("/api/admin/notifications/scan")
+def run_scan(u: User = Depends(require("notify.run")), s=Depends(db)):
+    n = notify.scan(s); audit(s, u.id, "notification_scan", sent=n)
+    return {"sent": n}
+
+
+# ---------- Case management (staff) ----------
+DEFAULT_STAGES = ["NEW_APPLICANT", "PROFILE_INCOMPLETE", "PROFILE_COMPLETED", "RESEARCH_IN_PROGRESS", "ELIGIBILITY_ASSESSMENT",
+                  "OPPORTUNITIES_IDENTIFIED", "APPLICANT_REVIEWING_OPTIONS", "DOCUMENTS_PREPARATION", "APPLICATION_READY",
+                  "APPLICATION_SUBMITTED", "AWAITING_RESPONSE", "ADDITIONAL_INFORMATION_REQUESTED", "INTERVIEW_STAGE",
+                  "DECISION_RECEIVED", "SUCCESSFUL", "UNSUCCESSFUL", "ON_HOLD", "CLOSED"]
+
+
+def stages(s):
+    r = s.get(Setting, "case_stages")
+    return r.value["stages"] if r else DEFAULT_STAGES
+
+
+@app.get("/api/case-stages")
+def get_stages(u: User = Depends(current_user), s=Depends(db)):
+    return stages(s)
+
+
+@app.put("/api/admin/case-stages")
+def set_stages(b: list[str], u: User = Depends(require("case.configure")), s=Depends(db)):
+    if not b or len(set(b)) != len(b) or any(not x.strip() for x in b): raise HTTPException(422, "need unique, non-empty stage names")
+    in_use = {c.stage for c in s.query(Case)}
+    if in_use - set(b): raise HTTPException(422, f"stages still in use cannot be removed: {sorted(in_use - set(b))}")
+    s.merge(Setting(key="case_stages", value={"stages": b})); s.commit(); audit(s, u.id, "stages_changed")
+    return b
+
+
+def get_case(cid, s) -> Case:
+    c = s.get(Case, cid)
+    if not c: raise HTTPException(404)
+    return c
+
+
+@app.get("/api/cases")
+def list_cases(stage: str | None = None, assigned_to: int | None = None, unassigned: bool = False,
+               u: User = Depends(require("case.manage")), s=Depends(db)):
+    q = s.query(Case)
+    if stage: q = q.filter_by(stage=stage)
+    if assigned_to: q = q.filter_by(assigned_to=assigned_to)
+    if unassigned: q = q.filter(Case.assigned_to.is_(None))
+    return [row(c) for c in q.limit(500)]
+
+
+@app.get("/api/cases/{cid}")
+def case_dashboard(cid: int, u: User = Depends(require("case.manage")), s=Depends(db)):
+    c = get_case(cid, s); ap = s.get(Applicant, c.applicant_id)
+    audit(s, u.id, "case_viewed", cid)
+    apps = s.query(Application).filter_by(applicant_id=c.applicant_id).all()
+    pws = s.query(Pathway).join(Country, Country.iso2 == Pathway.country).filter(Country.active.is_(True)).all()
+    assess = [{k: a[k] for k in ("pathway", "country", "status", "readiness_pct", "definitive")} for a in eligibility.assess_all(pws, ap.profile)]
+    open_tasks = s.query(Task).filter_by(case_id=cid, done=False).order_by(Task.due).all()
+    return {"case": row(c), "profile": ap.profile, "preferred_destinations": (ap.profile.get("preferences") or {}).get("destinations", []),
+            "assessment": assess, "applications": [row(a) for a in apps],
+            "documents": [{"id": d.id, "doc_type": d.doc_type, "expires_on": d.expires_on.isoformat() if d.expires_on else None}
+                          for d in s.query(Document).filter_by(applicant_id=c.applicant_id, deleted=False)],  # metadata only
+            "upcoming_deadlines": sorted(a.deadline.isoformat() for a in apps if a.deadline and a.status in ("PREPARING", "READY")),
+            "tasks": [row(t) for t in open_tasks],
+            "notes": [row(n) for n in s.query(CaseNote).filter_by(case_id=cid).order_by(CaseNote.id.desc())],
+            "communications": [row(x) for x in s.query(Communication).filter_by(case_id=cid).order_by(Communication.id.desc())]}
+
+
+class AssignIn(BaseModel):
+    staff_id: int | None
+
+
+@app.post("/api/cases/{cid}/assign")
+def assign(cid: int, b: AssignIn, u: User = Depends(require("case.manage")), s=Depends(db)):
+    c = get_case(cid, s)
+    if b.staff_id is not None:
+        st = s.get(User, b.staff_id)
+        if not st or not st.active or "case.manage" not in security.PERMS.get(st.role, set()):
+            raise HTTPException(422, "assignee must be active staff who can manage cases")
+    prev = c.assigned_to; c.assigned_to = b.staff_id; c.updated = datetime.utcnow(); s.commit()
+    audit(s, u.id, "case_assigned", cid, previous=prev, now=b.staff_id)
+    return row(c)
+
+
+@app.post("/api/cases/{cid}/stage")
+def set_case_stage(cid: int, stage: str, u: User = Depends(require("case.manage")), s=Depends(db)):
+    c = get_case(cid, s)
+    if stage not in stages(s): raise HTTPException(422, f"unknown stage; valid: {stages(s)}")
+    if stage != c.stage:
+        c.history = [*c.history, {"stage": stage, "at": datetime.utcnow().isoformat(timespec="seconds"), "by": u.id}]
+        c.stage, c.updated = stage, datetime.utcnow(); s.commit(); audit(s, u.id, "case_stage", cid, stage=stage)
+    return row(c)
+
+
+class NoteIn(BaseModel):
+    body: str
+
+
+@app.post("/api/cases/{cid}/notes")
+def add_note(cid: int, b: NoteIn, u: User = Depends(require("case.manage")), s=Depends(db)):
+    get_case(cid, s); n = CaseNote(case_id=cid, author_id=u.id, body=b.body); s.add(n); s.commit(); return row(n)
+
+
+class TaskIn(BaseModel):
+    title: str; assignee_id: int | None = None; due: date | None = None
+
+
+@app.post("/api/cases/{cid}/tasks")
+def add_task(cid: int, b: TaskIn, u: User = Depends(require("case.manage")), s=Depends(db)):
+    get_case(cid, s); t = Task(case_id=cid, **b.model_dump()); s.add(t); s.commit(); return row(t)
+
+
+@app.post("/api/tasks/{tid}/done")
+def finish_task(tid: int, u: User = Depends(require("case.manage")), s=Depends(db)):
+    t = s.get(Task, tid)
+    if not t: raise HTTPException(404)
+    t.done = True; s.commit(); return row(t)
+
+
+class CommIn(BaseModel):
+    channel: str; direction: str; summary: str
+
+
+@app.post("/api/cases/{cid}/communications")
+def log_comm(cid: int, b: CommIn, u: User = Depends(require("case.manage")), s=Depends(db)):
+    if b.direction not in ("inbound", "outbound"): raise HTTPException(422, "direction inbound|outbound")
+    get_case(cid, s); x = Communication(case_id=cid, author_id=u.id, **b.model_dump()); s.add(x); s.commit()
+    return row(x)  # records a communication; it does NOT send anything
+
+
+@app.get("/api/cases/{cid}/report")
+def case_report(cid: int, u: User = Depends(require("case.manage")), s=Depends(db)):
+    c = get_case(cid, s); h = c.history; now = datetime.utcnow(); per: dict[str, float] = {}
+    for i, e in enumerate(h):
+        start = datetime.fromisoformat(e["at"]); end = datetime.fromisoformat(h[i + 1]["at"]) if i + 1 < len(h) else now
+        per[e["stage"]] = per.get(e["stage"], 0) + (end - start).total_seconds() / 86400
+    return {"case_id": cid, "current_stage": c.stage, "days_per_stage": {k: round(v, 2) for k, v in per.items()},
+            "open_tasks": s.query(Task).filter_by(case_id=cid, done=False).count(), "history": h}
+
+
+@app.get("/api/my-case")
+def my_case(u: User = Depends(current_user), s=Depends(db)):
+    c = s.query(Case).filter_by(applicant_id=u.applicant_id).first()
+    if not c: raise HTTPException(404)
+    return {"stage": c.stage, "updated": c.updated.isoformat(), "advisor_assigned": c.assigned_to is not None}  # no internal notes
 
 
 @app.get("/")

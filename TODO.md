@@ -30,7 +30,10 @@ Order: 1) verification+research engine and country foundation (in progress) → 
 - [ ] AI (Claude) explanation layer [i needs API key] · full profile schema (education/employment history tables)
 ## Phase 5 Application operations
 - [x] Encrypted private document vault, applications, checklist, QA, status flow, applicant authorisation, export & deletion
-- [i] Malware scanning (ClamAV adapter) · [ ] AI document extraction · CV/letter drafting · [ ] staff case management (assign, tasks, notes, consultations)
+- [i] Malware scanning (ClamAV adapter) · [ ] AI document extraction · CV/letter drafting
+- [x] Staff case management: one case per applicant, 18 configurable stages, assign/reassign (staff-only assignees), notes (internal), tasks, communication log, dashboard (doc metadata only), time-per-stage report, applicant sees stage only
+- [ ] Consultation scheduling (Google Calendar adapter) · case report export · task reminders
 ## Phase 6-8 Automation, notifications, analytics, billing, i18n, workflow builder, fraud module, compliance pages, admin dashboard modules
-- [ ] Not started (fraud module done: see below; next: notifications, case management, admin dashboard)
+- [~] Notifications: in-app + preference model + critical/non-essential split + dedupe + deadline/document/regulatory triggers done and tested. [i] Email/SMS/WhatsApp/push providers (adapter interface only; email_status honestly reports NOT_CONFIGURED); [ ] matching/verification-change triggers, unsubscribe links
+- [ ] Not started: workflow builder, analytics, billing, i18n, admin dashboard UI, communication templates/outreach drafts, compliance pages (fraud module done: see below; next: notifications, case management, admin dashboard)
 - [x] Fraud: offer text indicator checker (public), user reports (no public labelling), investigation workflow, confirmed => DISQUALIFIED with evidence note. [ ] link-/domain-level checks, report deduplication, reporter protection policy

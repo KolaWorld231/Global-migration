@@ -1,4 +1,6 @@
 # Changelog
+## Session 4
+- Notifications service and staff case management (13 tests passing). Case table schema changed: recreate dev DBs (no migrations yet).
 ## Session 3
 - Research pipeline (sources, snapshots, regulatory change detection, feed leads, retries, scheduler) and fraud module. 10 tests passing.
 ## Session 2

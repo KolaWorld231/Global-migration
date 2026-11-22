@@ -24,6 +24,8 @@ PERMS = {
     "auditor": {"audit.read"},
     "applicant": set(),
 }
+PERMS["super_admin"] |= {"case.configure", "notify.run"}
+PERMS["agency_director"] |= {"case.configure"}
 PERMS["super_admin"] |= {"catalog.verify", "fraud.investigate"}
 PERMS["compliance_reviewer"] |= {"fraud.investigate", "research.review"}
 PERMS["super_admin"] |= {"research.review"}
