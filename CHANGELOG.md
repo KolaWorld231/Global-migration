@@ -1,4 +1,6 @@
 # Changelog
+## Session 7
+- Workflow engine, staff management, staff UI panels; 19 tests passing. Migration 486abc618d3d.
 ## Session 6
 - Alembic migrations with drift test; CI workflow. 15 tests passing.
 ## Session 5

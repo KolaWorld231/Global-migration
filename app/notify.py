@@ -5,7 +5,7 @@ import os
 from datetime import date, timedelta
 from .db import Notification, Applicant, User, Application, Document, Pathway, Setting
 
-CRITICAL_KINDS = {"deadline", "document_expiry", "regulatory_change", "application_action", "interview", "verification_change"}
+CRITICAL_KINDS = {"deadline", "document_expiry", "regulatory_change", "application_action", "interview", "verification_change", "account"}
 DEFAULT_PREFS = {"email": True, "marketing": False, "opportunity_alerts": False}
 
 

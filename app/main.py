@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from .db import (init_db, SessionLocal, Country, Pathway, Organization, Opportunity, Applicant, Case, DiscoveryJob)
 from .seed.loader import seed
 from .engine import eligibility, verification, advisor, discovery, matching
-from . import security, vault, prep, notify
+from . import security, vault, prep, notify, workflows
+from .db import Workflow, WorkflowRun, AuthSession
 from .db import Notification, CaseNote, Task, Communication, Setting
 from .engine import fraud, research
 from .db import ResearchSource, ResearchRun, ResearchResult, RegulatoryChange, SourceSnapshot, FraudReport
@@ -23,13 +24,14 @@ def _startup():
     init_db()
     seed()
     bootstrap_admin()
+    with SessionLocal() as _s: workflows.seed_defaults(_s)
     if os.environ.get("SCHEDULER") == "1":
         import threading, time
         def loop():
             while True:
                 try:
                     research.run_due()
-                    with SessionLocal() as s: notify.scan(s)
+                    with SessionLocal() as s: notify.scan(s); workflows.tick(s)
                 except Exception as e: print('[scheduler]', e)
                 time.sleep(900)
         threading.Thread(target=loop, daemon=True).start()
@@ -260,6 +262,7 @@ def register(r: RegisterIn, s=Depends(db)):
     ap = Applicant(profile={}, consent={}); s.add(ap); s.flush()
     u = User(email=email, pw_hash=security.hash_pw(r.password), role="applicant", applicant_id=ap.id)
     s.add(u); s.add(Case(applicant_id=ap.id, history=[{"stage": "NEW_APPLICANT", "at": datetime.utcnow().isoformat(timespec="seconds"), "by": None}])); s.commit(); audit(s, u.id, "register")
+    workflows.emit(s, "applicant.registered", {"applicant_id": ap.id, "user_id": u.id})
     return {"token": security.login(s, email, r.password), "applicant_id": ap.id}
 
 
@@ -500,6 +503,7 @@ def set_status(aid: int, b: StatusIn, u: User = Depends(current_user), s=Depends
     a.reference = b.reference or a.reference; a.follow_up_on = b.follow_up_on or a.follow_up_on
     log_event(a, f"status:{b.status}", note=b.note, reference=b.reference)
     s.commit(); audit(s, u.id, "application_status", aid, status=b.status)
+    workflows.emit(s, "application.status_changed", {"applicant_id": a.applicant_id, "application_id": a.id, "status": b.status, "pathway_id": a.pathway_id})
     return row(a)
 
 
@@ -594,7 +598,9 @@ def review_change(cid: int, decision: str, note: str = "", u: User = Depends(req
     if decision == "CONFIRMED_IMPACT":
         for p in s.query(Pathway).filter_by(country=c.country): p.last_verified = None
         s.flush(); notify.notify_country_change(s, c.country)
-    s.commit(); audit(s, u.id, "regulatory_change_reviewed", cid, decision=decision)
+    s.commit()
+    if decision == "CONFIRMED_IMPACT": workflows.emit(s, "regulatory.confirmed", {"country": c.country, "policy_area": c.policy_area})
+    audit(s, u.id, "regulatory_change_reviewed", cid, decision=decision)
     return row(c)
 
 
@@ -630,6 +636,7 @@ def report_fraud(b: ReportIn, u: User = Depends(current_user), s=Depends(db)):
     if b.org_id and (o := s.get(Organization, b.org_id)):
         o.needs_human_review = True  # internal flag only; public status is NOT changed by an unverified report
     s.commit(); audit(s, u.id, "fraud_reported", r.id)
+    workflows.emit(s, "fraud.reported", {"category": b.category, "report_id": r.id})
     return {"id": r.id, "status": r.status, "note": "Thank you. Staff will investigate. Reports do not publicly label anyone until reviewed."}
 
 
@@ -885,6 +892,81 @@ def dashboard(u: User = Depends(require("dashboard.view")), s=Depends(db)):
         "analytics": {"applicants_by_nationality": tally([a.profile.get("nationality") for a in aps]),
                       "applications_by_pathway": tally([a.pathway_id for a in apps])},
     }
+
+
+# ---------- Staff management ----------
+@app.get("/api/admin/staff")
+def list_staff(u: User = Depends(require("user.manage")), s=Depends(db)):
+    return [{"id": x.id, "email": x.email, "role": x.role, "active": x.active, "open_cases": s.query(Case).filter_by(assigned_to=x.id).count()}
+            for x in s.query(User).filter(User.role != "applicant")]
+
+
+class StaffPatch(BaseModel):
+    role: str | None = None; active: bool | None = None
+
+
+@app.patch("/api/admin/staff/{uid}")
+def patch_staff(uid: int, b: StaffPatch, u: User = Depends(require("user.manage")), s=Depends(db)):
+    t = s.get(User, uid)
+    if not t or t.role == "applicant": raise HTTPException(404)
+    if t.id == u.id: raise HTTPException(422, "you cannot change your own role or status")
+    if b.role is not None and (b.role not in security.ROLES or b.role == "applicant"): raise HTTPException(422, "bad role")
+    leaving = t.role == "super_admin" and ((b.role and b.role != "super_admin") or b.active is False)
+    if leaving and s.query(User).filter_by(role="super_admin", active=True).count() <= 1:
+        raise HTTPException(422, "cannot remove the last active super administrator")
+    prev = {"role": t.role, "active": t.active}
+    if b.role is not None: t.role = b.role
+    if b.active is not None:
+        t.active = b.active
+        if not b.active: s.query(AuthSession).filter_by(user_id=t.id).delete()  # revoke sessions immediately
+    s.commit(); audit(s, u.id, "staff_changed", uid, before=prev, role=t.role, active=t.active)
+    return {"id": t.id, "role": t.role, "active": t.active}
+
+
+# ---------- Workflows ----------
+class WorkflowIn(BaseModel):
+    name: str; trigger: str; conditions: list[dict] = []; steps: list[dict]; active: bool = True
+
+
+@app.get("/api/admin/workflows")
+def list_workflows(u: User = Depends(require("workflow.manage")), s=Depends(db)):
+    return {"workflows": [row(w) for w in s.query(Workflow)], "triggers": sorted(workflows.TRIGGERS), "step_types": sorted(workflows.STEP_TYPES)}
+
+
+@app.post("/api/admin/workflows")
+def save_workflow(b: WorkflowIn, u: User = Depends(require("workflow.manage")), s=Depends(db)):
+    try: workflows.validate(b.trigger, b.conditions, b.steps)
+    except ValueError as e: raise HTTPException(422, str(e))
+    w = s.query(Workflow).filter_by(name=b.name).first() or Workflow(name=b.name)
+    w.trigger, w.conditions, w.steps, w.active = b.trigger, b.conditions, b.steps, b.active
+    s.add(w); s.commit(); audit(s, u.id, "workflow_saved", w.id)
+    return row(w)
+
+
+@app.get("/api/admin/workflow-runs")
+def wf_runs(status: str | None = None, u: User = Depends(require("workflow.manage")), s=Depends(db)):
+    q = s.query(WorkflowRun).order_by(WorkflowRun.id.desc())
+    return [row(r) for r in (q.filter_by(status=status) if status else q).limit(200)]
+
+
+@app.post("/api/admin/workflow-runs/{rid}/retry")
+def wf_retry(rid: int, u: User = Depends(require("workflow.manage")), s=Depends(db)):
+    try: return row(workflows.retry(s, rid))
+    except ValueError as e: raise HTTPException(422, str(e))
+
+
+@app.post("/api/admin/workflow-runs/{rid}/decide")
+def wf_decide(rid: int, approve: bool, u: User = Depends(current_user), s=Depends(db)):
+    try: r = workflows.decide(s, rid, approve, u)
+    except PermissionError as e: raise HTTPException(403, f"missing permission: {e}")
+    except ValueError as e: raise HTTPException(422, str(e))
+    audit(s, u.id, "workflow_decision", rid, approve=approve)
+    return row(r)
+
+
+@app.post("/api/admin/workflow-runs/tick")
+def wf_tick(u: User = Depends(require("workflow.manage")), s=Depends(db)):
+    return {"resumed": workflows.tick(s)}
 
 
 @app.get("/")

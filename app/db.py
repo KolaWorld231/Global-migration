@@ -330,3 +330,27 @@ class FraudReport(Base):
     status: Mapped[str] = mapped_column(String(20), default="NEW", index=True)
     notes: Mapped[list] = mapped_column(JSON, default=list)
     created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
+class Workflow(Base):
+    """Admin-editable automation: trigger + conditions + ordered steps (data, not code)."""
+    __tablename__ = "workflows"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    trigger: Mapped[str] = mapped_column(String(60), index=True)
+    conditions: Mapped[list] = mapped_column(JSON, default=list)
+    steps: Mapped[list] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workflow_id: Mapped[int] = mapped_column(Integer, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="RUNNING", index=True)  # RUNNING|WAITING_DELAY|WAITING_APPROVAL|DONE|FAILED|REJECTED
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    step_index: Mapped[int] = mapped_column(Integer, default=0)
+    resume_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    log: Mapped[list] = mapped_column(JSON, default=list)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
